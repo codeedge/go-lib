@@ -1,6 +1,7 @@
 package gredis
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -8,9 +9,9 @@ import (
 
 	"github.com/kdcer/go-lib/lib/util"
 
-	"github.com/go-redis/redis"
 	"github.com/gogf/gf/frame/g"
 	"github.com/kdcer/go-lib/lib/goRedis"
+	"github.com/redis/go-redis/v9"
 )
 
 func Test_redis(t *testing.T) {
@@ -21,9 +22,9 @@ func Test_redis(t *testing.T) {
 	})
 
 	rdb := goRedis.Rdb
-	rdb.Set("key1", "1", 0)
-	rdb.Get("key1")
-	rdb.Del("key1")
+	rdb.Set(context.Background(), "key1", "1", 0)
+	rdb.Get(context.Background(), "key1")
+	rdb.Del(context.Background(), "key1")
 
 	_, err := goRedis.CheckAndDel("key1", "1")
 	t.Log(err)

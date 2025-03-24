@@ -1,13 +1,14 @@
 package goRedis
 
 import (
+	"context"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/util/gconv"
 
-	"github.com/go-redis/redis"
 	"github.com/gogf/gf/os/glog"
+	"github.com/redis/go-redis/v9"
 )
 
 var Rdb *redis.Client
@@ -23,7 +24,7 @@ func InitRedisPreKey(preKey string) {
 }
 
 func CheckAndDel(key, value string) (int, error) {
-	cmd := Rdb.Eval(`if redis.call("get",KEYS[1]) == ARGV[1]
+	cmd := Rdb.Eval(context.Background(), `if redis.call("get",KEYS[1]) == ARGV[1]
 										then
 											return redis.call("del",KEYS[1])
 										else
@@ -36,9 +37,9 @@ func CheckAndDel(key, value string) (int, error) {
 // SetValueIfNoExistExecFunc 设置value, 如果redis里没有该值的话, 就会执行execFunc
 func SetValueIfNoExistExecFunc(key string, value interface{}, execFunc func(), ex ...int64) (b bool) {
 	if len(ex) > 0 && ex[0] > 0 {
-		b = Rdb.SetNX(key, value, time.Second*time.Duration(ex[0])).Val()
+		b = Rdb.SetNX(context.Background(), key, value, time.Second*time.Duration(ex[0])).Val()
 	} else {
-		b = Rdb.SetNX(key, value, 0).Val()
+		b = Rdb.SetNX(context.Background(), key, value, 0).Val()
 	}
 	if !b {
 		glog.Errorf("SetValueIfNoExistExecFunc 执行失败 key=%v, value=%v,ex=%v, b=%v", key, value, ex, b)

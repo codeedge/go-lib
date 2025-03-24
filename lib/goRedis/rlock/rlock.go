@@ -1,6 +1,7 @@
 package rlock
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
 	"time"
@@ -31,7 +32,7 @@ func New(lockKey string, timeoutSec int64) (*RdsLock, error) {
 // Lock 加锁
 // 适合启动会执行多次的一般程序防止并发，比如定时任务的每一个定时任务内部间隔执行的场景，即使程序异常退出key没有释放，其他程序会一直轮询执行总会获得锁的
 func (lock *RdsLock) Lock() bool {
-	b := goRedis.Rdb.SetNX(lock.key, lock.value, time.Second*time.Duration(lock.timeoutSec)).Val()
+	b := goRedis.Rdb.SetNX(context.Background(), lock.key, lock.value, time.Second*time.Duration(lock.timeoutSec)).Val()
 	return b
 }
 
@@ -49,7 +50,7 @@ func (lock *RdsLock) SetTimeout(exTime ...int64) error {
 	} else {
 		expireTime = exTime[0]
 	}
-	err := goRedis.Rdb.Expire(lock.key, time.Second*time.Duration(expireTime)).Err()
+	err := goRedis.Rdb.Expire(context.Background(), lock.key, time.Second*time.Duration(expireTime)).Err()
 	return err
 }
 
