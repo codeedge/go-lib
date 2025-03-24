@@ -10,6 +10,8 @@ import (
 	"github.com/kdcer/go-lib/lib/goRedis"
 )
 
+// 使用第三方`github.com/go-redsync`更强大，支持redlock
+
 type RdsLock struct {
 	key        string // redis的键
 	value      string // 随机value 防止其他协程删除本协程的锁

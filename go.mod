@@ -1,6 +1,8 @@
 module github.com/kdcer/go-lib
 
-go 1.20
+go 1.22
+
+toolchain go1.24.0
 
 require (
 	github.com/FZambia/sentinel v1.1.0
@@ -11,8 +13,8 @@ require (
 	github.com/fastwego/microapp v1.0.0-beta.1
 	github.com/go-gomail/gomail v0.0.0-20160411212932-81ebce5c23df
 	github.com/go-redis/cache/v9 v9.0.0
-	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/go-redsync/redsync v1.4.2
+	github.com/go-redsync/redsync/v4 v4.13.0
 	github.com/goflyfox/gtoken v1.3.9
 	github.com/gogf/gf v1.16.5
 	github.com/gogf/guuid v1.0.0
@@ -21,6 +23,7 @@ require (
 	github.com/json-iterator/go v1.1.10
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/rabbitmq/amqp091-go v1.10.0
+	github.com/redis/go-redis/v9 v9.5.1
 	github.com/silenceper/wechat/v2 v2.0.9-rc.1
 	go.etcd.io/etcd v0.0.0-20200402134248-51bdeb39e698
 	go.mongodb.org/mongo-driver v1.7.3
@@ -54,8 +57,8 @@ require (
 	github.com/google/uuid v1.1.1 // indirect
 	github.com/gorilla/websocket v1.4.1 // indirect
 	github.com/grokify/html-strip-tags-go v0.0.0-20190921062105-daaa06bf1aaf // indirect
-	github.com/hashicorp/errwrap v1.0.0 // indirect
-	github.com/hashicorp/go-multierror v1.0.0 // indirect
+	github.com/hashicorp/errwrap v1.1.0 // indirect
+	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-uuid v1.0.1 // indirect
 	github.com/jcmturner/gofork v0.0.0-20190328161633-dc7c13fece03 // indirect
 	github.com/klauspost/compress v1.13.6 // indirect
@@ -69,7 +72,6 @@ require (
 	github.com/pierrec/lz4 v2.2.6+incompatible // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20181016184325-3113b8401b8a // indirect
-	github.com/redis/go-redis/v9 v9.0.0-rc.4 // indirect
 	github.com/rivo/uniseg v0.1.0 // indirect
 	github.com/satori/go.uuid v1.2.0 // indirect
 	github.com/sirupsen/logrus v1.8.1 // indirect
@@ -88,7 +90,7 @@ require (
 	go.uber.org/multierr v1.5.0 // indirect
 	go.uber.org/zap v1.14.1 // indirect
 	golang.org/x/net v0.5.0 // indirect
-	golang.org/x/sync v0.1.0 // indirect
+	golang.org/x/sync v0.3.0 // indirect
 	golang.org/x/sys v0.4.0 // indirect
 	golang.org/x/text v0.6.0 // indirect
 	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac // indirect
