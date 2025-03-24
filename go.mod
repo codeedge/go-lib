@@ -18,6 +18,7 @@ require (
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/gomodule/redigo v2.0.0+incompatible
 	github.com/json-iterator/go v1.1.10
+	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/silenceper/wechat/v2 v2.0.9-rc.1
 	go.etcd.io/etcd v0.0.0-20200402134248-51bdeb39e698
