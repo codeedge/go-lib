@@ -1,4 +1,4 @@
-module github.com/kdcer/go-lib
+module github.com/codeedge/go-lib
 
 go 1.22
 
