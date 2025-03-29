@@ -7,7 +7,7 @@ import (
 
 	"github.com/gogf/guuid"
 
-	"github.com/kdcer/go-lib/lib/gredis"
+	"github.com/codeedge/go-lib/lib/gredis"
 )
 
 type RdsLock struct {

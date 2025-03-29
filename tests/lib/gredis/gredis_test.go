@@ -2,13 +2,13 @@ package gredis
 
 import (
 	"fmt"
+	"github.com/codeedge/go-lib/lib/gredis"
+	"github.com/codeedge/go-lib/lib/gredis/config"
+	"github.com/codeedge/go-lib/lib/gredis/mode"
+	"github.com/codeedge/go-lib/lib/gredis/mode/alone"
+	"github.com/codeedge/go-lib/lib/gredis/mode/sentinel"
 	"github.com/gogf/gf/frame/g"
 	"github.com/gomodule/redigo/redis"
-	"github.com/kdcer/go-lib/lib/gredis"
-	"github.com/kdcer/go-lib/lib/gredis/config"
-	"github.com/kdcer/go-lib/lib/gredis/mode"
-	"github.com/kdcer/go-lib/lib/gredis/mode/alone"
-	"github.com/kdcer/go-lib/lib/gredis/mode/sentinel"
 	"testing"
 	"time"
 )

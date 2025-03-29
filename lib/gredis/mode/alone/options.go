@@ -1,8 +1,8 @@
 package alone
 
 import (
+	"github.com/codeedge/go-lib/lib/gredis/mode"
 	"github.com/gomodule/redigo/redis"
-	"github.com/kdcer/go-lib/lib/gredis/mode"
 )
 
 type options struct {

@@ -1,8 +1,8 @@
 package sentinel
 
 import (
-	"github.com/kdcer/go-lib/lib/gredis/config"
-	"github.com/kdcer/go-lib/lib/gredis/mode"
+	"github.com/codeedge/go-lib/lib/gredis/config"
+	"github.com/codeedge/go-lib/lib/gredis/mode"
 	"runtime"
 	"strings"
 	"time"

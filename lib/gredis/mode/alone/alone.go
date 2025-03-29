@@ -1,9 +1,9 @@
 package alone
 
 import (
-	"github.com/gomodule/redigo/redis"
-	"github.com/kdcer/go-lib/lib/gredis/config"
-	"github.com/kdcer/go-lib/lib/gredis/mode"
+	"github.com/codeedge/go-lib/lib/gredis/config"
+	"github.com/codeedge/go-lib/lib/gredis/mode"
+	"githu
 	"time"
 )
 

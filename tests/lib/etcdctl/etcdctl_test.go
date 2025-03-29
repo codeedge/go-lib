@@ -12,7 +12,7 @@ import (
 
 	"github.com/gogf/gf/os/glog"
 
-	"github.com/kdcer/go-lib/lib/etcdctl"
+	"github.com/codeedge/go-lib/lib/etcdctl"
 )
 
 func Test_Lock(t *testing.T) {

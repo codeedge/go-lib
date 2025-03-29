@@ -2,7 +2,7 @@ package goftp
 
 import (
 	"fmt"
-	"github.com/kdcer/go-lib/lib/util"
+	"github.com/codeedge/go-lib/lib/util"
 	"testing"
 )
 

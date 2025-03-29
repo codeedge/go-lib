@@ -1,11 +1,11 @@
 package gredis
 
 import (
+	"github.com/codeedge/go-lib/lib/gredis/config"
+	"github.com/codeedge/go-lib/lib/gredis/mode"
+	"github.com/codeedge/go-lib/lib/gredis/mode/alone"
+	"github.com/codeedge/go-lib/lib/gredis/mode/sentinel"
 	"github.com/gogf/gf/os/gcfg"
-	"github.com/kdcer/go-lib/lib/gredis/config"
-	"github.com/kdcer/go-lib/lib/gredis/mode"
-	"github.com/kdcer/go-lib/lib/gredis/mode/alone"
-	"github.com/kdcer/go-lib/lib/gredis/mode/sentinel"
 
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/os/glog"

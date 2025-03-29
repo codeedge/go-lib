@@ -1,8 +1,8 @@
 package gredis
 
 import (
-	"github.com/gomodule/redigo/redis"
-	"github.com/kdcer/go-lib/lib/gredis/mode"
+	"github.com/codeedge/go-lib/lib/gredis/mode"
+	
 )
 
 type SubFunc func(c redis.PubSubConn) (err error)

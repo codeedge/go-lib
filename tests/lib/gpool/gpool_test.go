@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kdcer/go-lib/lib/gpool"
+	"github.com/codeedge/go-lib/lib/gpool"
 )
 
 func Test_gpool_01(t *testing.T) {

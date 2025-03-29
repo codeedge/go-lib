@@ -3,8 +3,8 @@ package kafka
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/kdcer/go-lib/lib/gpool"
-	"github.com/kdcer/go-lib/lib/util"
+	"github.com/codeedge/go-lib/lib/gpool"
+	"github.com/codeedge/go-lib/lib/util"
 	"strconv"
 	"time"
 )

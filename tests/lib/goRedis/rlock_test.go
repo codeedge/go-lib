@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kdcer/go-lib/lib/goRedis/rlock"
+	"github.com/codeedge/go-lib/lib/goRedis/rlock"
 )
 
 // redis需要初始化 仅作演示用

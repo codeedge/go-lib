@@ -5,10 +5,10 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/codeedge/go-lib/lib/gredis"
+	"github.com/codeedge/go-lib/lib/gredis/config"
+	"github.com/codeedge/go-lib/lib/gredis/mode/alone"
 	"github.com/gogf/guuid"
-	"github.com/kdcer/go-lib/lib/gredis"
-	"github.com/kdcer/go-lib/lib/gredis/config"
-	"github.com/kdcer/go-lib/lib/gredis/mode/alone"
 
 	jsoniter "github.com/json-iterator/go"
 

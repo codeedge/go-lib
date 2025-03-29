@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/kdcer/go-lib/lib/casbin"
+	"github.com/codeedge/go-lib/lib/casbin"
 )
 
 func Test_Casbin(t *testing.T) {

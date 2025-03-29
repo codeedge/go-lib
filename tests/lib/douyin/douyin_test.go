@@ -2,10 +2,10 @@ package douyin
 
 import (
 	"encoding/json"
+	"github.com/codeedge/go-lib/li
 	"github.com/fastwego/microapp"
 	"github.com/fastwego/microapp/apis/auth"
 	"github.com/gogf/gf/frame/g"
-	"github.com/kdcer/go-lib/lib/douying"
 	"net/url"
 	"testing"
 )

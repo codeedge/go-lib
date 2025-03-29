@@ -4,7 +4,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/kdcer/go-lib/lib/gredis/mode"
+	"github.com/codeedge/go-lib/lib/gredis/mode"
 
 	"github.com/gogf/gf/os/glog"
 	"github.com/gomodule/redigo/redis"

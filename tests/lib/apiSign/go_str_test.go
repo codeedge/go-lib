@@ -5,8 +5,8 @@ import (
 
 	"github.com/gogf/gf/net/ghttp"
 
-	"github.com/gogf/gf/frame/g"
-	"github.com/kdcer/go-lib/lib/apiSign"
+	"github.com/codeedge/go-lib/lib/apiSign"
+
 )
 
 func Test_Sign(t *testing.T) {

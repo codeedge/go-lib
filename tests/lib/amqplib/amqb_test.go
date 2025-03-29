@@ -2,7 +2,7 @@ package amqplib
 
 import (
 	"context"
-	"github.com/kdcer/go-lib/lib/amqplib"
+	"github.com/codeedge/go-lib/lib/amqplib"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
 	"testing"

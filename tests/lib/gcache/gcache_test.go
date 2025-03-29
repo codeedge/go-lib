@@ -2,7 +2,7 @@ package gcache
 
 import (
 	"fmt"
-	"github.com/kdcer/go-lib/lib/gcache"
+	"github.com/codeedge/go-lib/lib/gcache"
 	"testing"
 	"time"
 )

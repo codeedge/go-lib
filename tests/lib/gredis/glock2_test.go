@@ -2,7 +2,7 @@ package gredis
 
 import (
 	"fmt"
-	"github.com/kdcer/go-lib/lib/gredis/glock"
+	"github.com/codeedge/go-lib/lib/gredis/glock"
 	"testing"
 	"time"
 )

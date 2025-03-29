@@ -12,7 +12,7 @@ import (
 
 	"github.com/gogf/gf/net/ghttp"
 
-	"github.com/kdcer/go-lib/lib/alioss"
+	"github.com/codeedge/go-lib/lib/alioss"
 
 	"github.com/gogf/gf/frame/g"
 )

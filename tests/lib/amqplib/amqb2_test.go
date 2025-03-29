@@ -3,7 +3,7 @@ package amqplib
 import (
 	"context"
 	"fmt"
-	v2 "github.com/kdcer/go-lib/lib/amqplib/v2"
+	v2 "github.com/codeedge/go-lib/lib/amqplib/v2"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
 	"testing"

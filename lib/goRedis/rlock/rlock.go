@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gogf/guuid"
-	"github.com/kdcer/go-lib/lib/goRedis"
+	"github.com/codeedge/go-lib/lib/goRedis"
+	
 )
 
 // 使用第三方`github.com/go-redsync`更强大，支持redlock

@@ -24,8 +24,9 @@ import (
 
 	"github.com/gogf/gf/net/ghttp"
 
+	"github.com/codeedge/go-lib/lib/wechat"
 	"github.com/gogf/gf/frame/g"
-	"github.com/kdcer/go-lib/lib/wechat"
+	"github.c
 	"github.com/silenceper/wechat/v2/cache"
 	miniConfig "github.com/silenceper/wechat/v2/miniprogram/config"
 	offConfig "github.com/silenceper/wechat/v2/officialaccount/config"
