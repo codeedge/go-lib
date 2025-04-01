@@ -202,6 +202,7 @@ func (c *Client) reconnect() {
 	newConn, err := createConnectionWithRetry(c.config)
 	if err != nil {
 		log.Printf("Permanent reconnect failure: %v", err)
+		//c.reconnect() // 如果需要失败一直重连递归调用
 		return
 	}
 

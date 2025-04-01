@@ -155,6 +155,8 @@ func TestReConnect(t *testing.T) {
 
 	time.Sleep(3 * time.Second)
 
+	v2.MQClient.Close() // close测试
+
 	msg = fmt.Sprintf("Log message %d", 222)
 	err = v2.MQClient.Publish(context.Background(), v2.PublishOption{
 		Exchange:    "",
