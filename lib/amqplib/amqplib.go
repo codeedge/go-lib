@@ -12,6 +12,8 @@ import (
 )
 
 // 声明队列等方法放在一个包含channel的结构体中，client创建为公共的，在init初始化。并且给client加个方法，返回包含channel的结构体，后面的操作都用包含channel的结构体操作
+// 有缺陷，断连后及时自动重连，创建的channel不能自动更新 需要池或者map等方式来同时重新创建channel，这样就不能通过返回值每次使用同一个channel的方式使用了，要不就每次创建要不
+// 使用前判断一下channel状态
 
 // Config 连接配置
 type Config struct {
@@ -31,7 +33,8 @@ type Client struct {
 
 // ChannelContext 包含 Channel 的操作上下文
 type ChannelContext struct {
-	ch *amqp.Channel
+	ch   *amqp.Channel
+	conn *amqp.Connection
 }
 
 // MQClient 全局公共变量
@@ -119,7 +122,7 @@ func (c *Client) NewChannelContext() (*ChannelContext, error) {
 		return nil, fmt.Errorf("failed to create channel: %w", err)
 	}
 
-	return &ChannelContext{ch: ch}, nil
+	return &ChannelContext{ch: ch, conn: c.conn}, nil
 }
 
 // Close 关闭 ChannelContext
@@ -171,6 +174,17 @@ func (c *Client) reconnect() {
 // Close 关闭客户端
 func (c *Client) Close() {
 	close(c.closeChan)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.conn != nil {
+		c.conn.Close()
+	}
+	c.connActive = false
+}
+
+func (c *Client) Close2() {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()

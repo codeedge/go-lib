@@ -59,7 +59,8 @@ func Test2(t *testing.T) {
 		URL:               "amqp://guest:guest@localhost:5672/",
 		MaxRetries:        5,
 		RetryBaseInterval: 1,
-		ConsumerPoolSize:  3,
+		PublisherPoolSize: 1,
+		ConsumerPoolSize:  1,
 	}
 
 	client, err := v2.New(cfg)
@@ -98,4 +99,88 @@ func Test2(t *testing.T) {
 
 	// 保持运行
 	select {}
+}
+
+// 重连测试
+func TestReConnect(t *testing.T) {
+	cfg := v2.Config{
+		URL:               "amqp://xz:xz@127.0.0.1:5672/xz",
+		MaxRetries:        5,
+		RetryBaseInterval: 1,
+		PublisherPoolSize: 1000,
+		ConsumerPoolSize:  1000,
+	}
+
+	err := v2.Init(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	//client.Close()
+
+	// 声明 Fanout 交换机
+	queueOpt, err := v2.MQClient.DeclareQueue(v2.QueueOption{
+		Name:       "test-queue",
+		Durable:    true,
+		AutoDelete: false,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	msg := fmt.Sprintf("Log message %d", 1111)
+	err = v2.MQClient.Publish(context.Background(), v2.PublishOption{
+		Exchange:    "",
+		RoutingKey:  queueOpt.Name,
+		ContentType: "text/plain",
+		Persistent:  false,
+	}, []byte(msg))
+
+	if err != nil {
+		log.Printf("Publish failed: %v", err)
+	} else {
+		log.Printf("Published: %s", msg)
+	}
+
+	// 开始消费
+	err = v2.MQClient.Consume(v2.ConsumeOption{
+		Queue:   queueOpt.Name,
+		AutoAck: true,
+	}, func(d amqp.Delivery) {
+		log.Printf("Received message: %s", d.Body)
+	})
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	time.Sleep(3 * time.Second)
+
+	msg = fmt.Sprintf("Log message %d", 222)
+	err = v2.MQClient.Publish(context.Background(), v2.PublishOption{
+		Exchange:    "",
+		RoutingKey:  queueOpt.Name,
+		ContentType: "text/plain",
+		Persistent:  false,
+	}, []byte(msg))
+
+	if err != nil {
+		log.Printf("Publish failed: %v", err)
+	} else {
+		log.Printf("Published: %s", msg)
+	}
+
+	// 开始消费
+	err = v2.MQClient.Consume(v2.ConsumeOption{
+		Queue:   queueOpt.Name,
+		AutoAck: true,
+	}, func(d amqp.Delivery) {
+		log.Printf("Received message: %s", d.Body)
+	})
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	time.Sleep(5 * time.Second)
+	fmt.Println(1)
 }

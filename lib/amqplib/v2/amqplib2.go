@@ -30,6 +30,11 @@ type Client struct {
 	closeChan chan struct{}
 }
 
+// MQClient 全局公共变量
+var (
+	MQClient *Client
+)
+
 // 创建带重试的连接
 func createConnectionWithRetry(cfg Config) (*amqp.Connection, error) {
 	var conn *amqp.Connection
@@ -81,6 +86,39 @@ func New(cfg Config) (*Client, error) {
 
 	go client.monitorConnection()
 	return client, nil
+}
+
+func Init(cfg Config) (err error) {
+	if cfg.MaxRetries <= 0 {
+		cfg.MaxRetries = 5
+	}
+	if cfg.RetryBaseInterval <= 0 {
+		cfg.RetryBaseInterval = 1
+	}
+	if cfg.PublisherPoolSize <= 0 {
+		cfg.PublisherPoolSize = 3
+	}
+	if cfg.ConsumerPoolSize <= 0 {
+		cfg.ConsumerPoolSize = 3
+	}
+
+	conn, err := createConnectionWithRetry(cfg)
+	if err != nil {
+		return err
+	}
+
+	client := &Client{
+		conn:      conn,
+		config:    cfg,
+		closeChan: make(chan struct{}),
+	}
+
+	client.pubPool = newChannelPool(conn, cfg.PublisherPoolSize)
+	client.consPool = newChannelPool(conn, cfg.ConsumerPoolSize)
+
+	go client.monitorConnection()
+	MQClient = client
+	return nil
 }
 
 // 通道池实现
@@ -141,6 +179,7 @@ func (c *Client) monitorConnection() {
 
 	select {
 	case <-c.closeChan:
+		log.Println("Connection closed manual-lock")
 		return
 	case err := <-notifyClose:
 		log.Printf("Connection closed: %v", err)
