@@ -1,9 +1,8 @@
 package kafka
 
 import (
+	"fmt"
 	"time"
-
-	"github.com/gogf/gf/os/glog"
 
 	"github.com/Shopify/sarama"
 )
@@ -24,11 +23,11 @@ func Init(address []string) {
 	//注意，版本设置不对的话，kafka会返回很奇怪的错误，并且无法成功发送消息
 	config.Version = sarama.V0_10_0_1
 
-	glog.Info("start make producer")
+	fmt.Println("start make producer")
 	//使用配置,新建一个异步生产者
 	producer, e := sarama.NewAsyncProducer(address, config)
 	if e != nil {
-		glog.Errorf("kafka创建生产者失败，err=", e)
+		fmt.Sprintf("kafka创建生产者失败，err=", e)
 		return
 	}
 	Producer = producer
@@ -51,16 +50,16 @@ func SaramaProducer(msg *sarama.ProducerMessage) {
 	go func(p sarama.AsyncProducer) {
 		defer func() {
 			if err := recover(); err != nil {
-				glog.Error("kafka连接异常", err)
+				fmt.Println("kafka连接异常", err)
 			}
 		}()
 		select {
 		case suc := <-p.Successes():
 			//fmt.Println("offset: ", suc.Offset, "timestamp: ", suc.Timestamp.String(), "partitions: ", suc.Partition)
-			glog.Info("offset: ", suc.Offset, "timestamp: ", suc.Timestamp.String(), "partitions: ", suc.Partition)
+			fmt.Println("offset: ", suc.Offset, "timestamp: ", suc.Timestamp.String(), "partitions: ", suc.Partition)
 		case fail := <-p.Errors():
 			//fmt.Println("err: ", fail.Err)
-			glog.Error("err: ", fail.Err)
+			fmt.Println("err: ", fail.Err)
 		}
 	}(Producer)
 	//使用通道发送

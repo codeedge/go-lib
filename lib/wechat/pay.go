@@ -20,7 +20,6 @@ import (
 
 	"github.com/silenceper/wechat/v2/util"
 
-	"github.com/gogf/gf/os/glog"
 	"golang.org/x/crypto/pkcs12"
 )
 
@@ -111,18 +110,18 @@ func (srv *PayService) SendRedPack(redPacketEntity *RedPacketRequest) (rsp *Resp
 	redPacketEntity.Sign = sign
 	data, err := xml.MarshalIndent(redPacketEntity, "", "   ")
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 		return nil, err
 	}
 	sendData := strings.Replace(string(data), redPacketRequestStr, xmlStr, -1)
 	res, err := srv.securePost(wechatURL, []byte(sendData))
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 		return
 	}
 	err = xml.Unmarshal(res, &rsp)
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 		return
 	}
 	fmt.Println(rsp)
@@ -140,7 +139,7 @@ func (srv *PayService) securePost(url string, xmlContent []byte) ([]byte, error)
 	resp, err := client.Post(url, "text/xml", bytes.NewBuffer(xmlContent))
 	if err != nil {
 		fmt.Println(err)
-		glog.Error(err)
+		fmt.Println(err)
 		return nil, err
 	}
 	return ioutil.ReadAll(resp.Body)

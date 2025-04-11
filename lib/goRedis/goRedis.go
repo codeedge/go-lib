@@ -2,12 +2,12 @@ package goRedis
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/util/gconv"
 
-	"github.com/gogf/gf/os/glog"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -42,7 +42,7 @@ func SetValueIfNoExistExecFunc(key string, value interface{}, execFunc func(), e
 		b = Rdb.SetNX(context.Background(), key, value, 0).Val()
 	}
 	if !b {
-		glog.Errorf("SetValueIfNoExistExecFunc 执行失败 key=%v, value=%v,ex=%v, b=%v", key, value, ex, b)
+		fmt.Sprintf("SetValueIfNoExistExecFunc 执行失败 key=%v, value=%v,ex=%v, b=%v", key, value, ex, b)
 		return b
 	}
 	execFunc()

@@ -14,7 +14,6 @@ import (
 
 	"github.com/gogf/gf/util/gconv"
 
-	"github.com/gogf/gf/os/glog"
 	"github.com/gomodule/redigo/redis"
 )
 
@@ -240,7 +239,7 @@ func Test_gredis_util_01(t *testing.T) {
 	_, _ = gredis.GetRedis().Lpush(key, "test4")
 	err := gredis.GetRedis().Ltrim(key, 1, 0)
 	if err != nil {
-		glog.Error("Test_gredis_util_01, ", err)
+		fmt.Println("Test_gredis_util_01, ", err)
 	}
 }
 

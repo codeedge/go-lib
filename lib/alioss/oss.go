@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/gogf/gf/os/glog"
-
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 )
 
@@ -38,13 +36,13 @@ func New(ossConfig *OssConfig) *OSS {
 		OssClient.OssConfig = ossConfig
 		client, err := oss.New(ossConfig.Endpoint, ossConfig.AccessKeyId, ossConfig.AccessKeySecret)
 		if err != nil {
-			glog.Error(err)
+			fmt.Println(err)
 			panic(err)
 		}
 		OssClient.client = client
 		bucket, err := client.Bucket(ossConfig.BucketName)
 		if err != nil {
-			glog.Error(err)
+			fmt.Println(err)
 			panic(err)
 		}
 		OssClient.Bucket = bucket
@@ -56,7 +54,7 @@ func New(ossConfig *OssConfig) *OSS {
 func (oss *OSS) Put(objectKey string, reader io.Reader, fileName string, options ...oss.Option) (uri string, err error) {
 	err = oss.Bucket.PutObject(objectKey, reader, options...)
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 	}
 	//uri = fmt.Sprintf("https://%s/%s/%s", oss.bucket.GetConfig().Endpoint, time.Now().Format("2006-01-02"), objectKey)
 	// 文件名编码返回url
@@ -70,7 +68,7 @@ func (oss *OSS) PutAsync(objectKey string, reader io.Reader, fileName string) (u
 	go func() {
 		err = oss.Bucket.PutObject(objectKey, reader)
 		if err != nil {
-			glog.Error(err)
+			fmt.Println(err)
 		}
 	}()
 	//uri = fmt.Sprintf("https://%s/%s/%s", oss.bucket.GetConfig().Endpoint, time.Now().Format("2006-01-02"), objectKey)
@@ -84,7 +82,7 @@ func (oss *OSS) PutAsync(objectKey string, reader io.Reader, fileName string) (u
 func (oss *OSS) Delete(objectKey string) (err error) {
 	err = oss.Bucket.DeleteObject(objectKey)
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 	}
 	return
 }
@@ -97,12 +95,12 @@ func (oss *OSS) ReName(srcObjectKey, destObjectKey string) (err error) {
 	destObjectKey = strings.Replace(destObjectKey, urlPrefix, "", 1)
 	_, err = oss.Bucket.CopyObject(srcObjectKey, destObjectKey)
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 		return
 	}
 	err = oss.Bucket.DeleteObject(srcObjectKey)
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 	}
 	return
 }
@@ -115,7 +113,7 @@ func (oss *OSS) Copy(srcObjectKey, destObjectKey string) (err error) {
 	destObjectKey = strings.Replace(destObjectKey, urlPrefix, "", 1)
 	_, err = oss.Bucket.CopyObject(srcObjectKey, destObjectKey)
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 		return
 	}
 	return

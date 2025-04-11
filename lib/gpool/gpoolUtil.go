@@ -1,7 +1,7 @@
 package gpool
 
 import (
-	"github.com/gogf/gf/os/glog"
+	"fmt"
 	"github.com/gogf/gf/os/gmlock"
 )
 
@@ -25,7 +25,7 @@ func GetPool(handlerName string, poolLimitSize ...uint64) *Pool {
 	} else {
 		pool, err := NewPool(limit)
 		if err != nil {
-			glog.Error("初始化gpool.Pool失败 poolLimitSize=", limit)
+			fmt.Println("初始化gpool.Pool失败 poolLimitSize=", limit)
 			panic(err)
 		}
 		poolMap[handlerName] = pool

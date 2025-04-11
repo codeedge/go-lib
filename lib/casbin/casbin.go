@@ -5,6 +5,7 @@
 package casbin
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/gogf/gf/os/gmlock"
@@ -12,7 +13,6 @@ import (
 	"github.com/casbin/casbin/v2"
 	xormadapter "github.com/casbin/xorm-adapter/v2"
 	"github.com/gogf/gf/frame/g"
-	"github.com/gogf/gf/os/glog"
 )
 
 var (
@@ -37,7 +37,7 @@ func Init(driverName, dataSourceName, key string) {
 		// 要使用自己定义的数据库rbac_db,最后的true很重要.默认为false,使用缺省的数据库名casbin,不存在则创建
 		//a, err := xormadapter.NewAdapter(driverName, dataSourceName, true)
 		//if err != nil {
-		//	glog.Error("casbin连接数据库错误: %v", err)
+		//	fmt.Println("casbin连接数据库错误: %v", err)
 		//	panic(err)
 		//}
 
@@ -49,13 +49,13 @@ func Init(driverName, dataSourceName, key string) {
 
 		a, err := xormadapter.NewAdapterWithTableName(driverName, dataSourceName, tablePrefix+"casbin_rule", "", true)
 		if err != nil {
-			glog.Error("casbin连接数据库错误: %v", err)
+			fmt.Println("casbin连接数据库错误: %v", err)
 			panic(err)
 		}
 
 		e, err := casbin.NewSyncedEnforcer(enforcerConfigMap[key], a)
 		if err != nil {
-			glog.Error("初始化casbin错误: %v", err)
+			fmt.Println("初始化casbin错误: %v", err)
 			panic(err)
 		}
 		enforcerMap[key] = e
@@ -93,7 +93,7 @@ func Enforcer(key ...string) *casbin.SyncedEnforcer {
 	// 每次获取权限时要调用`LoadPolicy()`否则不会重新加载数据库数据
 	err := enforcerMap[configKey].LoadPolicy()
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 		panic(err)
 	}
 	return enforcerMap[configKey]

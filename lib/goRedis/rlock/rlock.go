@@ -3,11 +3,11 @@ package rlock
 import (
 	"context"
 	"errors"
+	"github.com/gogf/guuid"
 	"sync/atomic"
 	"time"
 
 	"github.com/codeedge/go-lib/lib/goRedis"
-	
 )
 
 // 使用第三方`github.com/go-redsync`更强大，支持redlock

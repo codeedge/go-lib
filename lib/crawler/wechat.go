@@ -7,7 +7,6 @@ import (
 	"net/url"
 
 	"github.com/gogf/gf/frame/g"
-	"github.com/gogf/gf/os/glog"
 )
 
 type WXArticle struct {
@@ -172,14 +171,14 @@ func WechatCrawling(uri string) (wxArticle *WXArticle, err error) {
 	key := g.Config().GetString("wechat.wechatCrawling")
 	res, err := g.Client().Get(fmt.Sprintf("http://whosecard.com:8081/api/wx/article?url=%s&key=%s", url.QueryEscape(uri), key))
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 		return nil, errors.New("爬取失败，请重试")
 	}
 	dataStr := res.ReadAll()
 	wxArticle = &WXArticle{}
 	err = json.Unmarshal(dataStr, &wxArticle)
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 		return nil, errors.New("爬取失败，请重试")
 	}
 	if wxArticle.RetCode != 0 {

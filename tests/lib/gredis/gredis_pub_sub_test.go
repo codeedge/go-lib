@@ -6,7 +6,6 @@ import (
 	"github.com/codeedge/go-lib/lib/gredis"
 	"github.com/codeedge/go-lib/lib/gredis/config"
 	"github.com/codeedge/go-lib/lib/gredis/mode/alone"
-	"github.com/gogf/gf/os/glog"
 	"github.com/gogf/gf/util/gconv"
 	"github.com/gomodule/redigo/redis"
 	"strconv"
@@ -47,9 +46,9 @@ func Test_pub_sub_01(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	//ctx, _ := context.WithCancel(context.Background())
 	consume := func(msg redis.Message) error {
-		glog.Printf("recv channel:%s, msg: %s", msg.Channel, msg.Data)
+		fmt.Sprintf("recv channel:%s, msg: %s", msg.Channel, msg.Data)
 		if gconv.String(msg.Data) == "cancel" {
-			glog.Println("执行cancel()")
+			fmt.Println("执行cancel()")
 			cancel()
 		}
 		return nil
@@ -57,16 +56,16 @@ func Test_pub_sub_01(t *testing.T) {
 	// 异常情况下自动重新订阅
 	go func() {
 		if err := sRedigo.Sub(ctx, consume, "channel"); err != nil {
-			glog.Errorf("subscribe err: %v", err)
+			fmt.Sprintf("subscribe err: %v", err)
 		}
 	}()
 
 	for i := 0; i < 20; i++ {
-		glog.Printf("-------------- %d -----------------", i)
+		fmt.Sprintf("-------------- %d -----------------", i)
 		time.Sleep(time.Second)
 		_, err := sRedigo.Publish("channel", "hello, "+strconv.Itoa(i))
 		if err != nil {
-			glog.Fatal(err)
+			fmt.Println(err)
 		}
 		time.Sleep(time.Second)
 		//cancel()
@@ -110,21 +109,21 @@ func Test_pub_sub_02(t *testing.T) {
 	//ctx, cancel := context.WithCancel(context.Background())
 	ctx, _ := context.WithCancel(context.Background())
 	consume := func(msg redis.Message) error {
-		glog.Printf("recv msg: %s", msg.Data)
+		fmt.Sprintf("recv msg: %s", msg.Data)
 		return nil
 	}
 	go func() {
 		if err := sRedigo.Sub(ctx, consume, "channel"); err != nil {
-			glog.Println("subscribe err: %v", err)
+			fmt.Println("subscribe err: %v", err)
 		}
 	}()
 
 	for i := 0; i < 10; i++ {
-		glog.Printf("-------------- %d -----------------", i)
+		fmt.Sprintf("-------------- %d -----------------", i)
 		time.Sleep(time.Second)
 		_, err := sRedigo.Publish("channel", "hello, "+strconv.Itoa(i))
 		if err != nil {
-			glog.Fatal(err)
+			fmt.Println(err)
 		}
 		time.Sleep(time.Second)
 		//cancel()

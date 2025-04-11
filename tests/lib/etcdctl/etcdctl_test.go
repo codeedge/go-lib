@@ -10,8 +10,6 @@ import (
 
 	"go.etcd.io/etcd/clientv3"
 
-	"github.com/gogf/gf/os/glog"
-
 	"github.com/codeedge/go-lib/lib/etcdctl"
 )
 
@@ -39,17 +37,17 @@ func Test_Kv(t *testing.T) {
 	})
 	_, err := etcd.Put(context.Background(), "go/test/a", "1")
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 	}
 
 	_, err = etcd.Get(context.Background(), "go/test/a", clientv3.WithPrefix())
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 	}
 
 	resp, err := etcd.Get(context.Background(), "", clientv3.WithPrefix())
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 	}
 	fmt.Println(resp)
 

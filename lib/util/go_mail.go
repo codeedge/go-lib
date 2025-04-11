@@ -3,8 +3,8 @@ package util
 import (
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"github.com/go-gomail/gomail"
-	"github.com/gogf/gf/os/glog"
 	"net/smtp"
 )
 
@@ -42,7 +42,7 @@ func (e *Email) Send() error {
 	d.TLSConfig = &tls.Config{InsecureSkipVerify: true}
 	err := d.DialAndSend(m)
 	if err != nil {
-		glog.Errorf("***%s\n", err.Error())
+		fmt.Printlnf("***%s\n", err.Error())
 	}
 	return err
 }

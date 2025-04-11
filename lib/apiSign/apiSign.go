@@ -3,13 +3,13 @@ package apiSign
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
 
 	"github.com/gogf/gf/crypto/gmd5"
 	"github.com/gogf/gf/net/ghttp"
-	"github.com/gogf/gf/os/glog"
 	"github.com/gogf/gf/os/gtime"
 	"github.com/gogf/gf/util/gconv"
 )
@@ -60,7 +60,7 @@ func APISign(r *ghttp.Request, signParams *SignParams) (err error) {
 	// 忽略路径直接跳过
 	for _, signIgnorePath := range signParams.IgnoreFilterUrl {
 		if signIgnorePath == r.URL.Path || strings.HasPrefix(r.URL.Path, signIgnorePath) {
-			glog.Debug("忽略sign拦截链接url=", r.URL.String())
+			fmt.Println("忽略sign拦截链接url=", r.URL.String())
 			return nil
 		}
 	}
@@ -120,13 +120,13 @@ func APISign(r *ghttp.Request, signParams *SignParams) (err error) {
 	// 生成服务器sign
 	signServer, err := gmd5.Encrypt(kvString.String())
 	if err != nil {
-		glog.Error("参数签名 gmd5.Encrypt 错误", err)
+		fmt.Println("参数签名 gmd5.Encrypt 错误", err)
 		return signErr
 	}
-	//glog.Infof("服务器签名：%s", signServer)
+	//fmt.Printlnf("服务器签名：%s", signServer)
 	// 签名不一致 直接返回
 	if signServer != sign {
-		glog.Infof("签名错误：MD5原始字符串=%s,服务端签名结果=%s,客户端签名=%s,appInfo=%s", kvString.String(), signServer, sign, appInfo)
+		fmt.Sprintf("签名错误：MD5原始字符串=%s,服务端签名结果=%s,客户端签名=%s,appInfo=%s", kvString.String(), signServer, sign, appInfo)
 		return signErr
 	}
 	// 判断时间
@@ -134,7 +134,7 @@ func APISign(r *ghttp.Request, signParams *SignParams) (err error) {
 	// 时间取绝对值 和服务器时间偏移60秒以上不合法
 	interval = int64(math.Abs(float64(interval)))
 	if interval > 60 {
-		glog.Infof("签名超时：MD5原始字符串=%s,服务端签名结果=%s,客户端签名=%s,时间差=%d,appInfo=%s", kvString.String(), signServer, sign, interval, appInfo)
+		fmt.Sprintf("签名超时：MD5原始字符串=%s,服务端签名结果=%s,客户端签名=%s,时间差=%d,appInfo=%s", kvString.String(), signServer, sign, interval, appInfo)
 		return signErr
 	}
 	return nil

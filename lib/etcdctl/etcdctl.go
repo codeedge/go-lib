@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/gogf/gf/os/glog"
-
 	"go.etcd.io/etcd/clientv3"
 
 	"go.etcd.io/etcd/clientv3/concurrency"
@@ -26,7 +24,7 @@ func New(config clientv3.Config) *EtcdCtl {
 	// 建立一个客户端
 	etcdClient, err := clientv3.New(config)
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 		panic(err)
 	}
 	return &EtcdCtl{
@@ -43,21 +41,21 @@ func (e *EtcdCtl) Lock(lockKey string, f func() interface{}) (data interface{}) 
 	// create two separate sessions for lock competition
 	s1, err := concurrency.NewSession(e.Client)
 	if err != nil {
-		glog.Fatal(err)
+		fmt.Println(err)
 	}
 	defer s1.Close()
 	m1 := concurrency.NewMutex(s1, lockKey)
 
 	// 获取锁，如果锁被其他进程占用，则进入阻塞状态
 	if err := m1.Lock(context.TODO()); err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 	}
 	// 执行任务
 	data = f()
 	fmt.Println("acquired lock for s1")
 	// 释放锁
 	if err := m1.Unlock(context.TODO()); err != nil {
-		glog.Fatal(err)
+		fmt.Println(err)
 	}
 	fmt.Println("released lock for s1")
 	return data

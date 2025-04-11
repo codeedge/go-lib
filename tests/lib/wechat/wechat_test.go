@@ -16,7 +16,6 @@ import (
 
 	"github.com/silenceper/wechat/v2/officialaccount/material"
 
-	"github.com/gogf/gf/os/glog"
 	"github.com/gogf/guuid"
 	"github.com/silenceper/wechat/v2/miniprogram/qrcode"
 	"github.com/silenceper/wechat/v2/miniprogram/subscribe"
@@ -26,7 +25,6 @@ import (
 
 	"github.com/codeedge/go-lib/lib/wechat"
 	"github.com/gogf/gf/frame/g"
-	"github.c
 	"github.com/silenceper/wechat/v2/cache"
 	miniConfig "github.com/silenceper/wechat/v2/miniprogram/config"
 	offConfig "github.com/silenceper/wechat/v2/officialaccount/config"
@@ -198,13 +196,13 @@ func (s *WechatService) Serve(r *ghttp.Request) (err error) {
 	//处理消息接收以及回复
 	err = server.Serve()
 	if err != nil {
-		glog.Error("Serve Error, err=%+v", err)
+		fmt.Println("Serve Error, err=%+v", err)
 		return
 	}
 	//发送回复的消息
 	err = server.Send()
 	if err != nil {
-		glog.Error("Send Error, err=%+v", err)
+		fmt.Println("Send Error, err=%+v", err)
 		return
 	}
 	return err
@@ -304,13 +302,13 @@ func (s *WechatService) Example(r *ghttp.Request) (err error) {
 	if err != nil {
 		return err
 	}
-	glog.Info(resMenu)
+	fmt.Println(resMenu)
 	// 获取自定义菜单配置接口
 	resMenu2, err := wechat.OfficialAccount.GetMenu().GetCurrentSelfMenuInfo()
 	if err != nil {
 		return err
 	}
-	glog.Info(resMenu2)
+	fmt.Println(resMenu2)
 
 	// 方法1：获取菜单进行修改后更新
 	bts := make([]*menu.Button, 0)
@@ -327,7 +325,7 @@ func (s *WechatService) Example(r *ghttp.Request) (err error) {
 	// 方法2：直接通过json更新，不能有encode后的编码，否则报错
 	err = wechat.OfficialAccount.GetMenu().SetMenuByJSON(`{"button": [{"type": "miniprogram","name": "奥莱+","url": "http://www.bailiangroup.cn/","appid": "wxe97b0cd5680d13e0","pagepath": "pages/homepage/homepage"},{"name": "百联云店","sub_button": [{"type": "miniprogram","name": "青浦百联奥莱","url": "http://cloudwebapp.bl.com/page/cloudStoreDownload/即市新版本v1.2.5?cm_mmc=H5-tw-alsyb-1-1030-001304-0-0-0&invite=undefined","appid": "wx5cc935253e8cb92f","pagepath": "pages/YGHomePage/YGHomePage?shortcut=nFvZrZfghg1IsZRX"}]},{"name": "寻新之旅","sub_button": [{"type": "view","name": "杭州百联奥莱","url": "https://mp.weixin.qq.com/s/Iu8-W6-uYl9hceXFtAoiAw"},{"type": "view","name": "青岛百联奥莱","url": "https://mp.weixin.qq.com/s/jW2lbGnoy9ONkNXggX4OYw"}]}]}`)
 	if err != nil {
-		glog.Error(err)
+		fmt.Println(err)
 	}
 	// -----------------------------------菜单-----------------------------------------
 	return err
@@ -359,6 +357,6 @@ func (s *WechatService) Auth(r *ghttp.Request) (code string, err error) {
 		wechat.OfficialAccount.GetOauth().Redirect(r.Response.Writer, r.Request, authURL, scope, guuid.New().String())
 		r.Response.Request.Exit() // gf框架需要手动结束
 	}
-	glog.Info(code)
+	fmt.Println(code)
 	return code, nil
 }
