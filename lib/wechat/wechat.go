@@ -1,5 +1,6 @@
 package wechat
 
+// 已弃用，推荐使用 github.com/ArtisanCloud/PowerWeChat
 import (
 	"github.com/silenceper/wechat/v2"
 	"github.com/silenceper/wechat/v2/cache"

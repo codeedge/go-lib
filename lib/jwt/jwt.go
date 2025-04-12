@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gogf/gf/frame/g"
-
 	"github.com/golang-jwt/jwt"
 )
 
@@ -96,7 +94,7 @@ func (j *JWT) CreateToken(claims CustomClaims) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tk, err := token.SignedString(j.SigningKey)
 	if err != nil {
-		g.Log().Errorf("CreateToken失败:%s", err.Error())
+		fmt.Sprintf("CreateToken失败:%s", err.Error())
 	}
 	fmt.Println("Token:", tk)
 	return tk, err

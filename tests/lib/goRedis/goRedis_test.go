@@ -4,21 +4,18 @@ import (
 	"context"
 	"fmt"
 	"testing"
-
-	"github.com/gogf/gf/os/gtime"
+	"time"
 
 	"github.com/codeedge/go-lib/lib/util"
 
 	"github.com/codeedge/go-lib/lib/goRedis"
-	"github.com/gogf/gf/frame/g"
-	
 	"github.com/redis/go-redis/v9"
 )
 
 func Test_redis(t *testing.T) {
 	goRedis.InitRedis(&redis.Options{
-		Addr:     g.Config().GetString("redis.addr"),
-		Password: g.Config().GetString("redis.password"),
+		Addr:     "redis.addr",
+		Password: "redis.password",
 		DB:       0,
 	})
 
@@ -35,12 +32,12 @@ func Test_redis(t *testing.T) {
 	key := goRedis.GetRealCacheKey("RefreshToken:userId", 1)
 	// 获取今天最晚时间
 	todayLatestTime := util.GetTodayLatestTime()
-	timeout := (todayLatestTime.TimestampMilli() - gtime.TimestampMilli()) / 1000
+	timeout := (todayLatestTime.TimestampMilli() - time.Now().UnixMilli()) / 1000
 	if timeout < 0 {
 		timeout = 0
 	}
 
-	goRedis.SetValueIfNoExistExecFunc(key, gtime.Datetime(), func() {
+	goRedis.SetValueIfNoExistExecFunc(key, time.Now().Format("2006-01-02 15:04:05"), func() {
 		fmt.Println(111)
 	}, timeout)
 }
