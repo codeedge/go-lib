@@ -42,7 +42,7 @@ func (e *Email) Send() error {
 	d.TLSConfig = &tls.Config{InsecureSkipVerify: true}
 	err := d.DialAndSend(m)
 	if err != nil {
-		fmt.Printlnf("***%s\n", err.Error())
+		fmt.Sprintf("***%s\n", err.Error())
 	}
 	return err
 }
