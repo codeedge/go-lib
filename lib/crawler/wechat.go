@@ -1,12 +1,13 @@
 package crawler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 
-	"github.com/gogf/gf/frame/g"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 type WXArticle struct {
@@ -168,8 +169,8 @@ type WXArticle struct {
 
 // WechatCrawling 微信公众号爬虫数据获取
 func WechatCrawling(uri string) (wxArticle *WXArticle, err error) {
-	key := g.Config().GetString("wechat.wechatCrawling")
-	res, err := g.Client().Get(fmt.Sprintf("http://whosecard.com:8081/api/wx/article?url=%s&key=%s", url.QueryEscape(uri), key))
+	key := "wechat.wechatCrawling"
+	res, err := g.Client().Get(context.Background(), fmt.Sprintf("http://whosecard.com:8081/api/wx/article?url=%s&key=%s", url.QueryEscape(uri), key))
 	if err != nil {
 		fmt.Println(err)
 		return nil, errors.New("爬取失败，请重试")

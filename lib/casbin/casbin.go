@@ -6,13 +6,10 @@ package casbin
 
 import (
 	"fmt"
-	"strings"
-
-	"github.com/gogf/gf/os/gmlock"
+	"github.com/gogf/gf/v2/os/gmlock"
 
 	"github.com/casbin/casbin/v2"
 	xormadapter "github.com/casbin/xorm-adapter/v2"
-	"github.com/gogf/gf/frame/g"
 )
 
 var (
@@ -60,27 +57,6 @@ func Init(driverName, dataSourceName, key string) {
 		}
 		enforcerMap[key] = e
 	}
-}
-
-// Init2 goframe配置文件专用
-func Init2(key ...string) {
-	configKey := ""
-	if len(key) == 0 {
-		configKey = "default"
-	} else {
-		configKey = key[0]
-	}
-	link := g.Config().GetString("database.link")
-	if len(link) == 0 {
-		panic("casbin数据库连接为空")
-	}
-	links := strings.Split(link, ":")
-	if len(links) == 0 {
-		panic("casbin数据库连接错误")
-	}
-	driverName := links[0]
-	dataSourceName := strings.Replace(link, driverName+":", "", 1)
-	Init(driverName, dataSourceName, configKey)
 }
 
 func Enforcer(key ...string) *casbin.SyncedEnforcer {

@@ -2,7 +2,7 @@ package gpool
 
 import (
 	"fmt"
-	"github.com/gogf/gf/os/gmlock"
+	"github.com/gogf/gf/v2/os/gmlock"
 )
 
 var defaultPoolLimitSize uint64 = 100

@@ -10,25 +10,23 @@ import (
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/gogf/guuid"
 
-	"github.com/gogf/gf/net/ghttp"
+	"github.com/gogf/gf/v2/net/ghttp"
 
 	"github.com/codeedge/go-lib/lib/alioss"
-
-	"github.com/gogf/gf/frame/g"
 )
 
 func Test_OSS(t *testing.T) {
 	alioss.New(&alioss.OssConfig{
-		Endpoint:        g.Config().GetString("oss.endpoint"),
-		AccessKeyId:     g.Config().GetString("oss.accessKeyId"),
-		AccessKeySecret: g.Config().GetString("oss.accessKeySecret"),
-		BucketName:      g.Config().GetString("oss.bucketName"),
+		Endpoint:        "oss.endpoint",
+		AccessKeyId:     "oss.accessKeyId",
+		AccessKeySecret: "oss.accessKeySecret",
+		BucketName:      "oss.bucketName",
 	})
 	var r *ghttp.Request
 	file := r.GetUploadFile("file")
 	ext := path.Ext(file.Filename)
 	fileName := guuid.New().String() + ext
-	objectKey := fmt.Sprintf("%s/file/%s/%s", g.Config().GetString("oss.prefix"), time.Now().Format("2006-01"), fileName)
+	objectKey := fmt.Sprintf("%s/file/%s/%s", "oss.prefix", time.Now().Format("2006-01"), fileName)
 	f, err := file.Open()
 	if err != nil {
 		t.Fatal(err)

@@ -14,7 +14,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/gogf/gf/util/gconv"
+	"github.com/gogf/gf/v2/util/gconv"
 )
 
 // 生成32位md5字串

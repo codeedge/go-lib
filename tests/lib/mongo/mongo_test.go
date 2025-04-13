@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/gogf/gf/os/gtime"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -13,11 +13,10 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 
 	"github.com/codeedge/go-lib/lib/mongoext"
-
 )
 
 func Test_Mongo(t *testing.T) {
-	mongoext.InitMongo(g.Config().GetString("mongo.uri"), g.Config().GetString("mongo.db"), g.Config().GetUint64("mongo.maxPoolSize"))
+	mongoext.InitMongo("mongo.uri", "mongo.db", 100)
 	InitMongoExt()
 	res, err := MongoExtend.Banners.InsertOne(context.Background(), &Banners{
 		BaseMongo: BaseMongo{

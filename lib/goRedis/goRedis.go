@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gogf/gf/util/gconv"
+	"github.com/gogf/gf/v2/util/gconv"
 
 	"github.com/redis/go-redis/v9"
 )

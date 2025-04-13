@@ -3,10 +3,9 @@ package apiSign
 import (
 	"testing"
 
-	"github.com/gogf/gf/net/ghttp"
+	"github.com/gogf/gf/v2/net/ghttp"
 
 	"github.com/codeedge/go-lib/lib/apiSign"
-
 )
 
 func Test_Sign(t *testing.T) {
@@ -17,7 +16,7 @@ func Test_Sign(t *testing.T) {
 		WebSign:         "constants.ParamsWebSign",
 		IgnoreFilterUrl: signIgnoreFilterUrl,
 		IgnoreParams:    []string{"_start_time"},
-		MasterKey:       g.Cfg().GetString("sign.masterKey"),
+		MasterKey:       "sign.masterKey",
 	})
 	//if err != nil {
 	//	response.Json(r, response.SignFAIL, err.Error())
