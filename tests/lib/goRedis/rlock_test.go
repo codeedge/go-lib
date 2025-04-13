@@ -1,4 +1,4 @@
-package gredis
+package goredis
 
 import (
 	"fmt"

@@ -1,4 +1,4 @@
-package gredis
+package goredis
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/codeedge/go-lib/lib/goRedis"
 	"github.com/codeedge/go-lib/lib/goRedis/redisCache"
-	"githu
+	"github.com/go-redis/cache/v9"
 	"sync"
 	"testing"
 	"time"

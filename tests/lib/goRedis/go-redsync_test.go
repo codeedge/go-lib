@@ -1,4 +1,4 @@
-package gredis
+package goredis
 
 import (
 	"github.com/go-redsync/redsync/v4"

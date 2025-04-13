@@ -1,30 +1,26 @@
 module github.com/codeedge/go-lib
 
-go 1.22
+go 1.23.0
 
 toolchain go1.24.0
 
 require (
-	github.com/FZambia/sentinel v1.1.0
 	github.com/Shopify/sarama v1.24.1
 	github.com/aliyun/aliyun-oss-go-sdk v2.1.10+incompatible
 	github.com/casbin/casbin/v2 v2.47.3
 	github.com/casbin/xorm-adapter/v2 v2.5.1
-	github.com/fastwego/microapp v1.0.0-beta.1
 	github.com/go-gomail/gomail v0.0.0-20160411212932-81ebce5c23df
-	github.com/go-redsync/redsync v1.4.2
+	github.com/go-redis/cache/v9 v9.0.0
 	github.com/go-redsync/redsync/v4 v4.13.0
-	github.com/goflyfox/gtoken v1.3.9
 	github.com/gogf/gf v1.16.5
 	github.com/gogf/guuid v1.0.0
 	github.com/golang-jwt/jwt v3.2.2+incompatible
-	github.com/gomodule/redigo v2.0.0+incompatible
-	github.com/json-iterator/go v1.1.10
+	github.com/google/wire v0.6.0
 	github.com/mgtv-tech/jetcache-go v1.2.4
 	github.com/panjf2000/ants/v2 v2.11.2
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/rabbitmq/amqp091-go v1.10.0
-	github.com/redis/go-redis/v9 v9.6.1
+	github.com/redis/go-redis/v9 v9.7.3
 	github.com/silenceper/wechat/v2 v2.0.9-rc.1
 	go.etcd.io/etcd v0.0.0-20200402134248-51bdeb39e698
 	go.mongodb.org/mongo-driver v1.7.3
@@ -49,15 +45,15 @@ require (
 	github.com/eapache/go-resiliency v1.1.0 // indirect
 	github.com/eapache/go-xerial-snappy v0.0.0-20180814174437-776d5712da21 // indirect
 	github.com/eapache/queue v1.1.0 // indirect
-	github.com/faabiosr/cachego v0.16.1 // indirect
 	github.com/fatih/color v1.12.0 // indirect
 	github.com/fatih/structs v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/go-stack/stack v1.8.0 // indirect
 	github.com/gogf/mysql v1.6.1-0.20210603073548-16164ae25579 // indirect
 	github.com/gogo/protobuf v1.2.1 // indirect
-	github.com/golang/protobuf v1.4.2 // indirect
+	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/golang/snappy v0.0.1 // indirect
+	github.com/gomodule/redigo v2.0.0+incompatible // indirect
 	github.com/google/uuid v1.1.1 // indirect
 	github.com/gorilla/websocket v1.4.1 // indirect
 	github.com/grokify/html-strip-tags-go v0.0.0-20190921062105-daaa06bf1aaf // indirect
@@ -65,13 +61,12 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-uuid v1.0.1 // indirect
 	github.com/jcmturner/gofork v0.0.0-20190328161633-dc7c13fece03 // indirect
-	github.com/klauspost/compress v1.17.9 // indirect
+	github.com/json-iterator/go v1.1.10 // indirect
+	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/lib/pq v1.8.0 // indirect
 	github.com/mattn/go-colorable v0.1.8 // indirect
 	github.com/mattn/go-isatty v0.0.12 // indirect
 	github.com/mattn/go-runewidth v0.0.10 // indirect
-	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
-	github.com/modern-go/reflect2 v1.0.1 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/pierrec/lz4 v2.2.6+incompatible // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -81,6 +76,7 @@ require (
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/spf13/cast v1.3.1 // indirect
 	github.com/syndtr/goleveldb v1.0.0 // indirect
+	github.com/vmihailenco/go-tinylfu v0.2.2 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
@@ -94,13 +90,13 @@ require (
 	go.uber.org/zap v1.14.1 // indirect
 	golang.org/x/exp v0.0.0-20240904232852-e7e105dedf7e // indirect
 	golang.org/x/net v0.28.0 // indirect
-	golang.org/x/sync v0.11.0 // indirect
+	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	golang.org/x/text v0.17.0 // indirect
 	golang.org/x/time v0.0.0-20180412165947-fbb02b2291d2 // indirect
 	google.golang.org/genproto v0.0.0-20190819201941-24fa4b261c55 // indirect
 	google.golang.org/grpc v1.26.0 // indirect
-	google.golang.org/protobuf v1.23.0 // indirect
+	google.golang.org/protobuf v1.28.0 // indirect
 	gopkg.in/alexcesaro/quotedprintable.v3 v3.0.0-20150716171945-2caba252f4dc // indirect
 	gopkg.in/gomail.v2 v2.0.0-20160411212932-81ebce5c23df // indirect
 	gopkg.in/jcmturner/aescts.v1 v1.0.1 // indirect
