@@ -1,0 +1,5 @@
+{
+  "database": {
+    "dsn": "root:123456@tcp(localhost:13306)/test"
+  }
+}

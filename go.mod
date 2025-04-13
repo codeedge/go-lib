@@ -12,6 +12,7 @@ require (
 	github.com/go-gomail/gomail v0.0.0-20160411212932-81ebce5c23df
 	github.com/go-redis/cache/v9 v9.0.0
 	github.com/go-redsync/redsync/v4 v4.13.0
+	github.com/go-sql-driver/mysql v1.5.0
 	github.com/gogf/gf v1.16.5
 	github.com/gogf/guuid v1.0.0
 	github.com/golang-jwt/jwt v3.2.2+incompatible
