@@ -116,8 +116,38 @@ func Test_Casbin(t *testing.T) {
 		fmt.Println("很遗憾,权限验证没有通过")
 	}
 
-	casbin.Enforcer().ClearPolicy()
-	err = casbin.Enforcer().SavePolicy()
+	// GetGroupingPolicy和GetNamedGroupingPolicy("g")是一样的，获取所有的g行
+	gs, err := e.GetGroupingPolicy()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(gs)
+	gs2, err := e.GetNamedGroupingPolicy("g")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(gs2)
+	// GetFilteredGroupingPolicy和GetFilteredNamedGroupingPolicy("g"是一样的，筛选g行 ，如果涉及到多个g的比如有g2可以使用named方法指定g2来获取g2的数据
+	// index为0说明后面的参数组是从v0开始的，依次为v0,v1...
+	g3, err := e.GetFilteredGroupingPolicy(0, "1")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(g3)
+	namedGroupingPolicy, err := e.GetFilteredNamedGroupingPolicy("g", 0, "1")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(namedGroupingPolicy)
+	// 这样过滤出domain1域下的g行，中间的角色用空字符串代表跳过此条件
+	//namedGroupingPolicy2, err := e.GetFilteredGroupingPolicy(0, "1", "", "domain1")
+	//if err != nil {
+	//	panic(err)
+	//}
+	//fmt.Println(namedGroupingPolicy2)
+
+	e.ClearPolicy()
+	err = e.SavePolicy()
 	if err != nil {
 		panic(err)
 	}
