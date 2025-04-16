@@ -1,76 +1,87 @@
-// 2022年3月2日13:50:36
-// casbin封装
-// 使用init初始化，调用方法使用Enforcer
-
 package casbin
 
 import (
 	"fmt"
-	"github.com/gogf/gf/v2/os/gmlock"
-
 	"github.com/casbin/casbin/v2"
-	xormadapter "github.com/casbin/xorm-adapter/v2"
+	gormadapter "github.com/casbin/gorm-adapter/v3"
+	rediswatcher "github.com/casbin/redis-watcher/v2"
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
+	"sync"
+	"time"
 )
+
+// 支持多配置文件
 
 var (
-	enforcerMap       = make(map[string]*casbin.SyncedEnforcer, 0)
-	enforcerConfigMap map[string]string
+	enforcerMap = make(map[string]*casbin.SyncedEnforcer, 1)
+	_default    = "default"
+	lock        sync.Mutex
 )
 
-func SetConfig(configMap map[string]string) {
-	if _, ok := configMap["default"]; !ok {
-		panic("必须有default配置")
-	}
-	enforcerConfigMap = configMap
+type Config struct {
+	Key           string   // 配置的名称 默认为空代表默认的casbin配置
+	Path          string   // 配置的完整路径
+	DB            *gorm.DB // gorm
+	RedisAddr     string   // 配置Watcher监听策略变更 redis模式
+	RedisPassword string   // redis的密码
+	Enforcer      *casbin.SyncedEnforcer
 }
 
-func Init(driverName, dataSourceName, key string) {
-	if enforcerConfigMap == nil {
+func Init(config *Config) {
+	if config == nil || config.Path == "" || config.DB == nil {
 		panic("配置未初始化")
 	}
-	gmlock.Lock(key)
-	defer gmlock.Unlock(key)
-	if _, ok := enforcerMap[key]; !ok {
-		// 要使用自己定义的数据库rbac_db,最后的true很重要.默认为false,使用缺省的数据库名casbin,不存在则创建
-		//a, err := xormadapter.NewAdapter(driverName, dataSourceName, true)
-		//if err != nil {
-		//	fmt.Println("casbin连接数据库错误: %v", err)
-		//	panic(err)
-		//}
-
+	lock.Lock()
+	defer lock.Unlock()
+	if _, ok := enforcerMap[config.Key]; !ok {
 		// 配置前缀，针对多个配置文件时需要指定不同的casbin表
-		tablePrefix := ""
-		if key != "default" {
-			tablePrefix = key + "_"
+		prefix := ""
+		if config.Key != "" {
+			prefix = config.Key + "_"
 		}
 
-		a, err := xormadapter.NewAdapterWithTableName(driverName, dataSourceName, tablePrefix+"casbin_rule", "", true)
+		a, err := gormadapter.NewAdapterByDBUseTableName(config.DB, prefix, "casbin_rule")
 		if err != nil {
-			fmt.Println("casbin连接数据库错误: %v", err)
+			fmt.Sprintf("casbin连接数据库错误: %v", err)
 			panic(err)
 		}
 
-		e, err := casbin.NewSyncedEnforcer(enforcerConfigMap[key], a)
+		e, err := casbin.NewSyncedEnforcer(config.Path, a)
 		if err != nil {
-			fmt.Println("初始化casbin错误: %v", err)
+			fmt.Sprintf("初始化casbin错误: %v", err)
 			panic(err)
 		}
-		enforcerMap[key] = e
+		// 配置自动同步（示例：每隔30秒自动加载策略）
+		e.StartAutoLoadPolicy(30 * time.Second)
+
+		if config.RedisAddr != "" {
+			// 配置Watcher监听策略变更（如Redis） https://github.com/casbin/redis-watcher
+			watcher, _ := rediswatcher.NewWatcher(config.RedisAddr, rediswatcher.WatcherOptions{
+				Options: redis.Options{
+					Network:  "tcp",
+					Password: config.RedisPassword,
+				},
+				Channel: "/casbin",
+				// Only exists in test, generally be true
+				IgnoreSelf: true})
+			e.SetWatcher(watcher)
+		}
+
+		if config.Key == "" {
+			config.Key = _default
+		}
+		enforcerMap[config.Key] = e
 	}
 }
 
 func Enforcer(key ...string) *casbin.SyncedEnforcer {
 	configKey := ""
 	if len(key) == 0 {
-		configKey = "default"
+		configKey = _default
 	} else {
 		configKey = key[0]
-	}
-	// 每次获取权限时要调用`LoadPolicy()`否则不会重新加载数据库数据
-	err := enforcerMap[configKey].LoadPolicy()
-	if err != nil {
-		fmt.Println(err)
-		panic(err)
 	}
 	return enforcerMap[configKey]
 }
