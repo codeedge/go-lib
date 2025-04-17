@@ -26,7 +26,6 @@ type Config struct {
 	DB            *gorm.DB // gorm
 	RedisAddr     string   // 配置Watcher监听策略变更 redis模式
 	RedisPassword string   // redis的密码
-	Enforcer      *casbin.SyncedEnforcer
 }
 
 func Init(config *Config) {

@@ -23,7 +23,6 @@ func Test_Casbin(t *testing.T) {
 		DB:            db,
 		RedisAddr:     "127.0.0.1:6379",
 		RedisPassword: "123456",
-		Enforcer:      nil,
 	})
 
 	//casbin.Init(&casbin.Config{
