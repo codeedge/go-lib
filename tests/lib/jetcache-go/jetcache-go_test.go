@@ -30,6 +30,7 @@ func Example_basicUsage() {
 		Addrs: map[string]string{
 			"localhost": ":6379",
 		},
+		Password: "123456",
 	})
 
 	mycache := cache.New(cache.WithName("any"),
@@ -48,16 +49,18 @@ func Example_basicUsage() {
 	if err := mycache.Get(ctx, key, &wanted); err == nil {
 		fmt.Println(wanted)
 	}
-	// Output: {mystring 42}
+	// Output: {mystring 1}
 
 	mycache.Close()
 }
 
+// singleflight单飞模式
 func Example_advancedUsage() {
 	ring := redis.NewRing(&redis.RingOptions{
 		Addrs: map[string]string{
 			"localhost": ":6379",
 		},
+		Password: "123456",
 	})
 
 	mycache := cache.New(cache.WithName("any"),
@@ -81,11 +84,13 @@ func Example_advancedUsage() {
 	mycache.Close()
 }
 
+// MGet批量查询  调用Example_basicUsage()提前准备好3个数据
 func Example_mGetUsage() {
 	ring := redis.NewRing(&redis.RingOptions{
 		Addrs: map[string]string{
 			"localhost": ":6379",
 		},
+		Password: "123456",
 	})
 
 	mycache := cache.New(cache.WithName("any"),
@@ -97,11 +102,11 @@ func Example_mGetUsage() {
 	cacheT := cache.NewT[int, *object](mycache)
 
 	ctx := context.TODO()
-	key := "mget"
+	key := "mykey"
 	ids := []int{1, 2, 3}
 
 	ret := cacheT.MGet(ctx, key, ids, func(ctx context.Context, ids []int) (map[int]*object, error) {
-		return mockDBMGetObject(ids)
+		return mockDBMGetObject(ids) // key不存在才执行这个
 	})
 
 	var b bytes.Buffer
@@ -109,7 +114,7 @@ func Example_mGetUsage() {
 		b.WriteString(fmt.Sprintf("%v", ret[id]))
 	}
 	fmt.Println(b.String())
-	// Output: &{mystring 1}&{mystring 2}<nil>
+	// Output: &{mystring 1}&{mystring 2}&{mystring 3}
 
 	cacheT.Close()
 }
@@ -119,6 +124,7 @@ func Example_syncLocalUsage() {
 		Addrs: map[string]string{
 			"localhost": ":6379",
 		},
+		Password: "123456",
 	})
 
 	sourceID := "12345678" // Unique identifier for this cache instance
@@ -170,7 +176,7 @@ func mockDBGetObject(id int) (*object, error) {
 	if id > 100 {
 		return nil, errRecordNotFound
 	}
-	return &object{Str: "mystring", Num: 42}, nil
+	return &object{Str: "mystring", Num: id}, nil
 }
 
 func mockDBMGetObject(ids []int) (map[int]*object, error) {
