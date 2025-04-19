@@ -84,7 +84,7 @@ func Example_advancedUsage() {
 	mycache.Close()
 }
 
-// MGet批量查询  调用Example_basicUsage()提前准备好3个数据
+// MGet批量查询
 func Example_mGetUsage() {
 	ring := redis.NewRing(&redis.RingOptions{
 		Addrs: map[string]string{
@@ -102,11 +102,11 @@ func Example_mGetUsage() {
 	cacheT := cache.NewT[int, *object](mycache)
 
 	ctx := context.TODO()
-	key := "mykey"
+	key := "mykey1"
 	ids := []int{1, 2, 3}
 
 	ret := cacheT.MGet(ctx, key, ids, func(ctx context.Context, ids []int) (map[int]*object, error) {
-		return mockDBMGetObject(ids) // key不存在才执行这个
+		return mockDBMGetObject(ids) // key不存在才执行这个，并且会将返回值同步到redis
 	})
 
 	var b bytes.Buffer
@@ -172,6 +172,7 @@ func Example_syncLocalUsage() {
 	time.Sleep(time.Second)
 }
 
+// 模拟从数据库获取数据
 func mockDBGetObject(id int) (*object, error) {
 	if id > 100 {
 		return nil, errRecordNotFound
@@ -179,12 +180,10 @@ func mockDBGetObject(id int) (*object, error) {
 	return &object{Str: "mystring", Num: id}, nil
 }
 
+// 模拟从数据库批量获取数据
 func mockDBMGetObject(ids []int) (map[int]*object, error) {
 	ret := make(map[int]*object)
 	for _, id := range ids {
-		if id == 3 {
-			continue
-		}
 		ret[id] = &object{Str: "mystring", Num: id}
 	}
 	return ret, nil
