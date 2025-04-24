@@ -14,6 +14,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// https://juejin.cn/post/7278246015194447887
+// https://juejin.cn/post/7403315125007368242
+// https://github.com/mgtv-tech/jetcache-go/blob/main/docs/CN/GettingStarted.md
+
 //func Test_1(t *testing.T) {
 //
 //}
@@ -40,7 +44,7 @@ func Example_basicUsage() {
 
 	ctx := context.TODO()
 	key := "mykey:1"
-	obj, _ := mockDBGetObject(1)
+	obj, _ := mockDBGetObject(context.TODO(), 1)
 	if err := mycache.Set(ctx, key, cache.Value(obj), cache.TTL(time.Hour)); err != nil {
 		panic(err)
 	}
@@ -74,7 +78,7 @@ func Example_advancedUsage() {
 	obj := new(object)
 	if err := mycache.Once(ctx, key, cache.Value(obj), cache.TTL(time.Hour), cache.Refresh(true),
 		cache.Do(func(ctx context.Context) (any, error) {
-			return mockDBGetObject(1)
+			return mockDBGetObject(ctx, 1)
 		})); err != nil {
 		panic(err)
 	}
@@ -84,7 +88,7 @@ func Example_advancedUsage() {
 	mycache.Close()
 }
 
-// MGet批量查询
+// MGet批量查询 也使用了单飞模式
 func Example_mGetUsage() {
 	ring := redis.NewRing(&redis.RingOptions{
 		Addrs: map[string]string{
@@ -106,7 +110,7 @@ func Example_mGetUsage() {
 	ids := []int{1, 2, 3}
 
 	ret := cacheT.MGet(ctx, key, ids, func(ctx context.Context, ids []int) (map[int]*object, error) {
-		return mockDBMGetObject(ids) // key不存在才执行这个，并且会将返回值同步到redis
+		return mockDBMGetObject(ctx, ids) // key不存在才执行这个，并且会将返回值同步到redis
 	})
 
 	var b bytes.Buffer
@@ -144,7 +148,7 @@ func Example_syncLocalUsage() {
 			ring.Publish(context.Background(), channelName, string(bs))
 		}),
 	)
-	obj, _ := mockDBGetObject(1)
+	obj, _ := mockDBGetObject(context.TODO(), 1)
 	if err := mycache.Set(context.TODO(), "mykey", cache.Value(obj), cache.TTL(time.Hour)); err != nil {
 		panic(err)
 	}
@@ -173,7 +177,7 @@ func Example_syncLocalUsage() {
 }
 
 // 模拟从数据库获取数据
-func mockDBGetObject(id int) (*object, error) {
+func mockDBGetObject(ctx context.Context, id int) (*object, error) {
 	if id > 100 {
 		return nil, errRecordNotFound
 	}
@@ -181,7 +185,7 @@ func mockDBGetObject(id int) (*object, error) {
 }
 
 // 模拟从数据库批量获取数据
-func mockDBMGetObject(ids []int) (map[int]*object, error) {
+func mockDBMGetObject(ctx context.Context, ids []int) (map[int]*object, error) {
 	ret := make(map[int]*object)
 	for _, id := range ids {
 		ret[id] = &object{Str: "mystring", Num: id}
