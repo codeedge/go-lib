@@ -11,9 +11,14 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+const (
+	Json = "application/json"
+	Text = "text/plain"
+)
+
 // Config 连接配置
 type Config struct {
-	URL               string // amqp://user:pass@host:port/vhost
+	URL               string // RabbitMQ 连接地址，例如 amqp://user:pass@host:port/vhost
 	MaxRetries        int    // 最大重试次数
 	RetryBaseInterval int    // 重试基础间隔（秒）
 	PublisherPoolSize int    // 生产者通道池大小
@@ -22,17 +27,19 @@ type Config struct {
 
 // Client RabbitMQ 客户端
 type Client struct {
-	conn      *amqp.Connection
-	config    Config
-	pubPool   *channelPool
-	consPool  *channelPool
-	mu        sync.RWMutex
-	closeChan chan struct{}
+	conn      *amqp.Connection    // 底层 AMQP 连接
+	config    Config              // 连接配置
+	pubPool   *channelPool        // 生产者通道池
+	consPool  *channelPool        // 消费者通道池
+	mu        sync.RWMutex        // 读写锁，保护连接重建等操作
+	closeChan chan struct{}       // 关闭信号通道
+	queueMu   sync.RWMutex        // 队列声明锁
+	queues    map[string]struct{} // 存储已声明的队列信息
 }
 
-// MQClient 全局公共变量
+// MQ  全局公共变量
 var (
-	MQClient *Client
+	MQ *Client
 )
 
 // 创建带重试的连接
@@ -53,39 +60,6 @@ func createConnectionWithRetry(cfg Config) (*amqp.Connection, error) {
 	}
 
 	return nil, fmt.Errorf("failed to connect after %d attempts: %w", cfg.MaxRetries, err)
-}
-
-// New 创建新客户端
-func New(cfg Config) (*Client, error) {
-	if cfg.MaxRetries <= 0 {
-		cfg.MaxRetries = 5
-	}
-	if cfg.RetryBaseInterval <= 0 {
-		cfg.RetryBaseInterval = 1
-	}
-	if cfg.PublisherPoolSize <= 0 {
-		cfg.PublisherPoolSize = 3
-	}
-	if cfg.ConsumerPoolSize <= 0 {
-		cfg.ConsumerPoolSize = 3
-	}
-
-	conn, err := createConnectionWithRetry(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	client := &Client{
-		conn:      conn,
-		config:    cfg,
-		closeChan: make(chan struct{}),
-	}
-
-	client.pubPool = newChannelPool(conn, cfg.PublisherPoolSize)
-	client.consPool = newChannelPool(conn, cfg.ConsumerPoolSize)
-
-	go client.monitorConnection()
-	return client, nil
 }
 
 func Init(cfg Config) (err error) {
@@ -111,21 +85,21 @@ func Init(cfg Config) (err error) {
 		conn:      conn,
 		config:    cfg,
 		closeChan: make(chan struct{}),
+		queues:    make(map[string]struct{}),
 	}
 
 	client.pubPool = newChannelPool(conn, cfg.PublisherPoolSize)
 	client.consPool = newChannelPool(conn, cfg.ConsumerPoolSize)
 
 	go client.monitorConnection()
-	MQClient = client
+	MQ = client
 	return nil
 }
 
-// 通道池实现
+// channelPool 通道池实现，用于复用 AMQP 通道
 type channelPool struct {
-	channels chan *amqp.Channel
-	conn     *amqp.Connection
-	mu       sync.Mutex
+	channels chan *amqp.Channel // 通道池
+	conn     *amqp.Connection   // 关联的 AMQP 连接
 }
 
 func newChannelPool(conn *amqp.Connection, size int) *channelPool {
@@ -202,7 +176,6 @@ func (c *Client) reconnect() {
 	newConn, err := createConnectionWithRetry(c.config)
 	if err != nil {
 		log.Printf("Permanent reconnect failure: %v", err)
-		//c.reconnect() // 如果需要失败一直重连递归调用
 		return
 	}
 
@@ -210,6 +183,11 @@ func (c *Client) reconnect() {
 	c.conn = newConn
 	c.pubPool = newChannelPool(newConn, c.config.PublisherPoolSize)
 	c.consPool = newChannelPool(newConn, c.config.ConsumerPoolSize)
+
+	// 清空已声明队列记录，因为连接已重建
+	c.queueMu.Lock()
+	c.queues = make(map[string]struct{})
+	c.queueMu.Unlock()
 
 	log.Println("Reconnected successfully")
 	go c.monitorConnection()
@@ -237,15 +215,15 @@ func (c *Client) Close() {
 	}
 }
 
-// ExchangeOption 声明交换机
+// ExchangeOption 声明交换机参数
 type ExchangeOption struct {
-	Name       string
-	Kind       string
-	Durable    bool
-	AutoDelete bool
-	Internal   bool
-	NoWait     bool
-	Args       amqp.Table
+	Name       string     // 交换机名称
+	Kind       string     // 交换机类型（如 direct、fanout、topic、headers）
+	Durable    bool       // 是否持久化
+	AutoDelete bool       // 是否自动删除
+	Internal   bool       // 是否为内部交换机
+	NoWait     bool       // 是否不等待服务器响应
+	Args       amqp.Table // 额外参数
 }
 
 func (c *Client) DeclareExchange(opt ExchangeOption) error {
@@ -266,24 +244,39 @@ func (c *Client) DeclareExchange(opt ExchangeOption) error {
 	)
 }
 
-// QueueOption 声明队列
+// QueueOption 声明队列参数
 type QueueOption struct {
-	Name       string
-	Durable    bool
-	AutoDelete bool
-	Exclusive  bool
-	NoWait     bool
-	Args       amqp.Table
+	Name       string     // 队列名称
+	Durable    bool       // 是否持久化
+	AutoDelete bool       // 是否自动删除
+	Exclusive  bool       // 是否排他队列
+	NoWait     bool       // 是否不等待服务器响应
+	Args       amqp.Table // 额外参数
 }
 
-func (c *Client) DeclareQueue(opt QueueOption) (amqp.Queue, error) {
+func (c *Client) DeclareQueue(opt *QueueOption) error {
+	// 检查队列名称是否为空
+	if opt.Name == "" {
+		return fmt.Errorf("queue name cannot be empty")
+	}
+
+	// 先检查队列是否已声明
+	c.queueMu.RLock()
+	if _, exists := c.queues[opt.Name]; exists {
+		c.queueMu.RUnlock()
+		return nil
+	}
+	c.queueMu.RUnlock()
+
+	// 获取通道
 	ch, err := c.pubPool.Get()
 	if err != nil {
-		return amqp.Queue{}, err
+		return err
 	}
 	defer c.pubPool.Put(ch)
 
-	return ch.QueueDeclare(
+	// 声明队列
+	queue, err := ch.QueueDeclare(
 		opt.Name,
 		opt.Durable,
 		opt.AutoDelete,
@@ -291,10 +284,26 @@ func (c *Client) DeclareQueue(opt QueueOption) (amqp.Queue, error) {
 		opt.NoWait,
 		opt.Args,
 	)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("queue declare %s", queue.Name)
+
+	// 记录队列信息
+	c.queueMu.Lock()
+	c.queues[opt.Name] = struct{}{}
+	c.queueMu.Unlock()
+
+	return nil
 }
 
 // BindQueue 队列绑定
 func (c *Client) BindQueue(queue, key, exchange string) error {
+	// 检查队列名称是否为空
+	if queue == "" {
+		return fmt.Errorf("queue name cannot be empty")
+	}
 	ch, err := c.pubPool.Get()
 	if err != nil {
 		return err
@@ -310,17 +319,24 @@ func (c *Client) BindQueue(queue, key, exchange string) error {
 	)
 }
 
-// PublishOption 发布消息
+// PublishOption 发布消息参数
 type PublishOption struct {
-	Exchange    string
-	RoutingKey  string
-	Mandatory   bool
-	Immediate   bool
-	ContentType string
-	Persistent  bool
+	Exchange    string // 交换机名称
+	RoutingKey  string // 路由键
+	Mandatory   bool   // 如果为 true，消息无法路由到队列时会返回给生产者
+	Immediate   bool   // 如果为 true，消息无法立即投递到消费者会返回给生产者
+	ContentType string // 消息内容类型
+	Persistent  bool   // 是否持久化消息
 }
 
-func (c *Client) Publish(ctx context.Context, opt PublishOption, body []byte) error {
+func (c *Client) Publish(ctx context.Context, opt *PublishOption, body []byte) error {
+	// 检查队列名称是否为空
+	if opt.RoutingKey == "" {
+		return fmt.Errorf("queue name cannot be empty")
+	}
+	// 先声明队列
+	c.DeclareQueue(&QueueOption{Name: opt.RoutingKey, Durable: true})
+
 	ch, err := c.pubPool.Get()
 	if err != nil {
 		return err
@@ -332,7 +348,8 @@ func (c *Client) Publish(ctx context.Context, opt PublishOption, body []byte) er
 		deliveryMode = amqp.Persistent
 	}
 
-	return ch.PublishWithContext(ctx,
+	return ch.PublishWithContext(
+		ctx,
 		opt.Exchange,
 		opt.RoutingKey,
 		opt.Mandatory,
@@ -345,25 +362,30 @@ func (c *Client) Publish(ctx context.Context, opt PublishOption, body []byte) er
 	)
 }
 
-// ConsumeOption 消费消息
+// ConsumeOption 消费消息参数
 type ConsumeOption struct {
-	Queue     string
-	Consumer  string
-	AutoAck   bool
-	Exclusive bool
-	NoLocal   bool
-	NoWait    bool
-	Args      amqp.Table
+	Queue     string     // 队列名称
+	Consumer  string     // 消费者标签
+	AutoAck   bool       // 是否自动确认
+	Exclusive bool       // 是否排他消费者
+	NoLocal   bool       // 不接收自身发布的消息（RabbitMQ 不支持）
+	NoWait    bool       // 是否不等待服务器响应
+	Args      amqp.Table // 额外参数
 }
 
-func (c *Client) Consume(opt ConsumeOption, handler func(amqp.Delivery)) error {
+func (c *Client) Consume(ctx context.Context, opt *ConsumeOption, handler func(amqp.Delivery)) error {
+	// 检查队列名称是否为空
+	if opt.Queue == "" {
+		return fmt.Errorf("queue name cannot be empty")
+	}
 	ch, err := c.consPool.Get()
 	if err != nil {
 		return err
 	}
 	defer c.consPool.Put(ch)
 
-	deliveries, err := ch.Consume(
+	deliveries, err := ch.ConsumeWithContext(
+		ctx,
 		opt.Queue,
 		opt.Consumer,
 		opt.AutoAck,

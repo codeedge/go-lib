@@ -3,7 +3,7 @@ package amqplib
 import (
 	"context"
 	"fmt"
-	v2 "github.com/codeedge/go-lib/lib/amqplib/v2"
+	. "github.com/codeedge/go-lib/lib/amqplib/v2"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
 	"testing"
@@ -12,21 +12,20 @@ import (
 
 // 生产者（发布/订阅模式）
 func Test1(t *testing.T) {
-	cfg := v2.Config{
+	cfg := Config{
 		URL:               "amqp://xz:xz@127.0.0.1:5672/xz",
 		MaxRetries:        5,
 		RetryBaseInterval: 1,
 		PublisherPoolSize: 3,
 	}
 
-	client, err := v2.New(cfg)
+	err := Init(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer client.Close()
 
 	// 声明 Fanout 交换机
-	err = client.DeclareExchange(v2.ExchangeOption{
+	err = MQ.DeclareExchange(ExchangeOption{
 		Name:       "logs",
 		Kind:       "fanout",
 		Durable:    false,
@@ -38,7 +37,7 @@ func Test1(t *testing.T) {
 
 	for i := 0; ; i++ {
 		msg := fmt.Sprintf("Log message %d", i)
-		err := client.Publish(context.Background(), v2.PublishOption{
+		err := MQ.Publish(context.Background(), &PublishOption{
 			Exchange:    "logs",
 			RoutingKey:  "",
 			ContentType: "text/plain",
@@ -55,7 +54,7 @@ func Test1(t *testing.T) {
 }
 
 func Test2(t *testing.T) {
-	cfg := v2.Config{
+	cfg := Config{
 		URL:               "amqp://guest:guest@localhost:5672/",
 		MaxRetries:        5,
 		RetryBaseInterval: 1,
@@ -63,15 +62,15 @@ func Test2(t *testing.T) {
 		ConsumerPoolSize:  1,
 	}
 
-	client, err := v2.New(cfg)
+	err := Init(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer client.Close()
 
+	queueName := "test-queue"
 	// 声明临时队列
-	q, err := client.DeclareQueue(v2.QueueOption{
-		Name:       "",
+	err = MQ.DeclareQueue(&QueueOption{
+		Name:       queueName,
 		Durable:    false,
 		AutoDelete: true,
 		Exclusive:  true,
@@ -81,13 +80,13 @@ func Test2(t *testing.T) {
 	}
 
 	// 绑定到交换机
-	if err := client.BindQueue(q.Name, "", "logs"); err != nil {
+	if err := MQ.BindQueue(queueName, "", "logs"); err != nil {
 		log.Fatal(err)
 	}
 
 	// 开始消费
-	err = client.Consume(v2.ConsumeOption{
-		Queue:   q.Name,
+	err = MQ.Consume(context.Background(), &ConsumeOption{
+		Queue:   queueName,
 		AutoAck: true,
 	}, func(d amqp.Delivery) {
 		log.Printf("Received message: %s", d.Body)
@@ -103,7 +102,7 @@ func Test2(t *testing.T) {
 
 // 重连测试
 func TestReConnect(t *testing.T) {
-	cfg := v2.Config{
+	cfg := Config{
 		URL:               "amqp://xz:xz@127.0.0.1:5672/xz",
 		MaxRetries:        5,
 		RetryBaseInterval: 1,
@@ -111,15 +110,16 @@ func TestReConnect(t *testing.T) {
 		ConsumerPoolSize:  1000,
 	}
 
-	err := v2.Init(cfg)
+	err := Init(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
 	//client.Close()
+	queueName := "test-queue"
 
 	// 声明 Fanout 交换机
-	queueOpt, err := v2.MQClient.DeclareQueue(v2.QueueOption{
-		Name:       "test-queue",
+	err = MQ.DeclareQueue(&QueueOption{
+		Name:       queueName,
 		Durable:    true,
 		AutoDelete: false,
 	})
@@ -128,9 +128,9 @@ func TestReConnect(t *testing.T) {
 	}
 
 	msg := fmt.Sprintf("Log message %d", 1111)
-	err = v2.MQClient.Publish(context.Background(), v2.PublishOption{
+	err = MQ.Publish(context.Background(), &PublishOption{
 		Exchange:    "",
-		RoutingKey:  queueOpt.Name,
+		RoutingKey:  queueName,
 		ContentType: "text/plain",
 		Persistent:  false,
 	}, []byte(msg))
@@ -142,8 +142,8 @@ func TestReConnect(t *testing.T) {
 	}
 
 	// 开始消费
-	err = v2.MQClient.Consume(v2.ConsumeOption{
-		Queue:   queueOpt.Name,
+	err = MQ.Consume(context.Background(), &ConsumeOption{
+		Queue:   queueName,
 		AutoAck: true,
 	}, func(d amqp.Delivery) {
 		log.Printf("Received message: %s", d.Body)
@@ -155,12 +155,12 @@ func TestReConnect(t *testing.T) {
 
 	time.Sleep(3 * time.Second)
 
-	v2.MQClient.Close() // close测试
+	MQ.Close() // close测试
 
 	msg = fmt.Sprintf("Log message %d", 222)
-	err = v2.MQClient.Publish(context.Background(), v2.PublishOption{
+	err = MQ.Publish(context.Background(), &PublishOption{
 		Exchange:    "",
-		RoutingKey:  queueOpt.Name,
+		RoutingKey:  queueName,
 		ContentType: "text/plain",
 		Persistent:  false,
 	}, []byte(msg))
@@ -172,8 +172,8 @@ func TestReConnect(t *testing.T) {
 	}
 
 	// 开始消费
-	err = v2.MQClient.Consume(v2.ConsumeOption{
-		Queue:   queueOpt.Name,
+	err = MQ.Consume(context.Background(), &ConsumeOption{
+		Queue:   queueName,
 		AutoAck: true,
 	}, func(d amqp.Delivery) {
 		log.Printf("Received message: %s", d.Body)
