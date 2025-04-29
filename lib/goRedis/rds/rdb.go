@@ -76,10 +76,9 @@ func LockExtend(lockKey string, expiry time.Duration, task func()) {
 			select {
 			case <-ticker.C:
 				ok, err := mutex.Extend()
-				if err != nil {
-					fmt.Println("Failed to extend lock:", err)
-				} else if !ok {
-					fmt.Println("Failed to extend lock: not successes")
+				if !ok || err != nil {
+					log.Printf("Failed to extend lock: ok:%v err:%v", ok, err)
+					return
 				}
 			case <-done:
 				return
@@ -105,7 +104,8 @@ func LockExtend(lockKey string, expiry time.Duration, task func()) {
 // lockKey 锁的key
 // expiry 锁的过期时间
 // task 执行的任务
-func LockAwaitOnce(lockKey string, expiry time.Duration, task func()) {
+// clear 在续期失败时清理执行的任务，比如清理定时任务，防止续期失败后其他机器和本机器多次执行了定时任务
+func LockAwaitOnce(lockKey string, expiry time.Duration, task func(), clear func()) {
 	if expiry < 1 {
 		expiry = 10 * time.Second
 	}
@@ -125,10 +125,10 @@ func LockAwaitOnce(lockKey string, expiry time.Duration, task func()) {
 
 			for range ticker.C {
 				ok, err := mutex.Extend()
-				if err != nil {
-					fmt.Println("Failed to extend lock:", err)
-				} else if !ok {
-					fmt.Println("Failed to extend lock: not successes")
+				if !ok || err != nil {
+					log.Printf("Failed to extend lock: ok:%v err:%v", ok, err)
+					clear()
+					return
 				}
 			}
 		}()
