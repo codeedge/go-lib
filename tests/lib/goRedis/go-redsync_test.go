@@ -2,6 +2,7 @@ package goredis
 
 import (
 	"fmt"
+	"github.com/codeedge/go-lib/lib/goRedis/rds"
 	"github.com/go-redsync/redsync/v4"
 	"github.com/go-redsync/redsync/v4/redis/goredis/v9"
 	goredislib "github.com/redis/go-redis/v9"
@@ -48,27 +49,20 @@ func Test_LockRedsync(t *testing.T) {
 // 在获取锁后，开启一个goroutine来周期性地续租锁。当需要锁的工作完成后，关闭done channel以通知续租goroutine停止，并释放锁。
 // 如何是在定时任务等场景使用，不需要释放锁，需要一直续期，直到程序退出或者崩溃才会释放锁，这样保证集群下只有一台机器获得了定时任务的锁。
 func Test_ExtendContext(t *testing.T) {
-	// Create a pool with go-redis (or redigo) which is the pool redisync will
-	// use while communicating with Redis. This can also be any pool that
-	// implements the `redis.Pool` interface.
 	client := goredislib.NewClient(&goredislib.Options{
-		Addr: "localhost:6379",
+		Addr:     "localhost:6379",
+		Password: "123456",
 	})
 	pool := goredis.NewPool(client) // or, pool := redigo.NewPool(...)
 
-	// Create an instance of redisync to be used to obtain a mutual exclusion
-	// lock.
 	rs := redsync.New(pool)
 
-	// Obtain a new mutex by using the same name for all instances wanting the
-	// same lock.
 	mutexname := "my-global-mutex"
-	mutex := rs.NewMutex(mutexname, redsync.WithExpiry(10*time.Second)) // 创建一个带有10秒过期时间的互斥锁
+	// 创建一个带有10秒过期时间的互斥锁 WithTries默认重试32次，WithRetryDelay设置重试之间等待的时间长度 默认值为 rand(50 毫秒， 250 毫秒)。
+	mutex := rs.NewMutex(mutexname, redsync.WithExpiry(10*time.Second), redsync.WithTries(3), redsync.WithRetryDelay(time.Millisecond*50))
 
-	// Obtain a lock for our given mutex. After this is successful, no one else
-	// can obtain the same lock (the same mutex name) until we unlock it.
-	if err := mutex.Lock(); err != nil {
-		panic(err)
+	if err := mutex.Lock(); err != nil { // 如果默认重试和默认重试等待时间不改，获取锁失败会等待1.6到8秒之间
+		fmt.Println(err)
 	}
 
 	// Do your work that requires the lock.
@@ -105,4 +99,16 @@ func Test_ExtendContext(t *testing.T) {
 	if ok, err := mutex.Unlock(); !ok || err != nil {
 		panic("unlock failed")
 	}
+}
+
+func Test_RdbLock(t *testing.T) {
+	rds.Init(&goredislib.Options{
+		Addr:     "localhost:6379",
+		Password: "123456",
+	})
+	rds.LockAwaitOnce("test-lock", time.Second*10, func() {
+		fmt.Println("do something")
+	}, func() {
+		fmt.Println("clear something")
+	})
 }
