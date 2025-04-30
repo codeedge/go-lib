@@ -111,7 +111,7 @@ func LockAwaitOnce(lockKey string, expiry time.Duration, task func(), clear func
 	if expiry < 1 {
 		expiry = 10 * time.Second
 	}
-	// 创建一个带有过期时间的互斥锁 重试32次，WithRetryDelay设置重试之间等待的时间长度 默认值为 rand(50 毫秒， 250 毫秒)。
+	// 创建一个带有过期时间的互斥锁 设置重试3次，重试之间等待的时间长度50毫秒
 	mutex := Rs.NewMutex(lockKey, redsync.WithExpiry(expiry), redsync.WithTries(3), redsync.WithRetryDelay(time.Millisecond*50))
 	// 一直循环尝试获取锁，获取成功则执行任务
 	for {
