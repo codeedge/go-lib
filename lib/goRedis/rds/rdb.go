@@ -107,7 +107,7 @@ func LockExtend(lockKey string, expiry time.Duration, task func()) {
 // expiry 锁的过期时间
 // task 执行的任务
 // clear 在续期失败时清理执行的任务，比如清理定时任务，防止续期失败后其他机器和本机器多次执行了定时任务
-func LockAwaitOnce(lockKey string, expiry time.Duration, task func(), clear func()) {
+func LockAwaitOnce(lockKey string, expiry time.Duration, task func(), clear ...func()) {
 	if expiry < 1 {
 		expiry = 10 * time.Second
 	}
@@ -115,7 +115,6 @@ func LockAwaitOnce(lockKey string, expiry time.Duration, task func(), clear func
 	mutex := Rs.NewMutex(lockKey, redsync.WithExpiry(expiry), redsync.WithTries(3), redsync.WithRetryDelay(time.Millisecond*50))
 	// 一直循环尝试获取锁，获取成功则执行任务
 	for {
-		fmt.Println("for-begin")
 		if err := mutex.Lock(); err != nil {
 			// 获取失败睡眠一半的时间再重试
 			time.Sleep(expiry / 2)
@@ -131,7 +130,9 @@ func LockAwaitOnce(lockKey string, expiry time.Duration, task func(), clear func
 				ok, err := mutex.Extend()
 				if !ok || err != nil {
 					log.Printf("Failed to extend lock: ok:%v err:%v", ok, err)
-					clear()
+					if len(clear) > 0 {
+						clear[0]()
+					}
 					return
 				}
 			}
