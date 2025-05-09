@@ -115,12 +115,12 @@ func Pool() *ants.Pool {
 			// Nonblocking 为 true 时，Pool.Submit 永远不会阻塞。如果无法立即提交任务，会直接返回 ErrPoolOverload 错误。当 Nonblocking 为 true 时，MaxBlockingTasks 配置无效。
 			Nonblocking: false,
 			// MaxBlockingTasks 是 pool.Submit 方法的最大阻塞任务数。默认值 0 表示无限制。当阻塞的任务数达到此值时，提交新任务会返回错误。
-			MaxBlockingTasks: MaxSessions * 2,
+			MaxBlockingTasks: 0,
 			// PreAlloc 表示在初始化 Pool 时是否预分配内存。如果为 true，会提前分配内存以优化性能。
 			PreAlloc: false,
 			// PanicHandler 用于处理 worker 协程中的 panic。如果为 nil，panic 会从 worker 协程中直接抛出（可能导致进程崩溃）。
 			PanicHandler: func(e interface{}) {
-				fmt.Printlnf("%v\n%s", e, debug.Stack())
+				fmt.Printf("%v\n%s", e, debug.Stack())
 			},
 			// Logger 是自定义的日志记录器，用于输出日志。如果未设置，默认使用标准库的 `log` 包。
 			Logger: nil,
@@ -130,7 +130,7 @@ func Pool() *ants.Pool {
 		var err error
 		pool, err = ants.NewPool(MaxSessions, ants.WithOptions(options))
 		if err != nil {
-			fmt.Printlnf("new pool error: %v", err)
+			fmt.Printf("new pool error: %v", err)
 		}
 	})
 	return pool
