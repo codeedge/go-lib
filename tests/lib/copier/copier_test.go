@@ -199,11 +199,10 @@ func Test_CopyWithOption(t *testing.T) {
 				// 这样写同时支持time.Time 和 *time.Time SrcType和Fn转换的类型要写一样的 建议全部写成结构体
 				// 测试指针不能满足所有场景 如果这里写&time.Time{}，Fn写srcTime.(*time.Time)当Copy的字段为结构体时不走Fn函数
 				SrcType: time.Time{},
-				DstType: "",
+				DstType: copier.String, // 或者写"",
 				Fn: func(srcTime any) (dst any, err error) {
 					// 测试只有时间类型会经过此函数，所有可以直接转换类型
-					src, _ := srcTime.(time.Time)
-					return src.Format(time.DateTime), nil
+					return srcTime.(time.Time).Format(time.DateTime), nil
 					//if src, ok := srcTime.(time.Time); ok {
 					//	return src.Format(time.DateTime), nil
 					//}
