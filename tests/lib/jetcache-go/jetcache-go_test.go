@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	json2 "github.com/mgtv-tech/jetcache-go/encoding/json"
 	"time"
 
 	"github.com/mgtv-tech/jetcache-go"
@@ -40,6 +41,7 @@ func Example_basicUsage() {
 	mycache := cache.New(cache.WithName("any"),
 		cache.WithRemote(remote.NewGoRedisV9Adapter(ring)),
 		cache.WithLocal(local.NewFreeCache(256*local.MB, time.Minute)),
+		cache.WithCodec(json2.Name),
 		cache.WithErrNotFound(errRecordNotFound))
 
 	ctx := context.TODO()

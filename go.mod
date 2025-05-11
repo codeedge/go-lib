@@ -18,6 +18,7 @@ require (
 	github.com/gogf/guuid v1.0.0
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/google/wire v0.6.0
+	github.com/jinzhu/copier v0.4.0
 	github.com/mgtv-tech/jetcache-go v1.2.4
 	github.com/panjf2000/ants/v2 v2.11.2
 	github.com/patrickmn/go-cache v2.1.0+incompatible
