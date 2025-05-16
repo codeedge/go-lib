@@ -5,6 +5,7 @@ import (
 	"iter"
 	"maps"
 	"slices"
+	"sync"
 	"testing"
 )
 
@@ -21,6 +22,7 @@ func Test_MyRange(t *testing.T) {
 	for value := range MyRange(1, 3) {
 		fmt.Println(value) // 1 2 3
 	}
+	// iter.Seq泛型方法迭代器，v 1个参数，返回bool值的函数都可以使用迭代器
 	fmt.Println(slices.Collect(MyRange(1, 3))) // [1 2 3]
 }
 
@@ -61,4 +63,27 @@ func Test_IntSeq(t *testing.T) {
 	}
 	// 如果要 break，脱糖后就得到了 return false。
 	// 这个设计，可谓是为了不增加一个 yield 关键字而煞费苦心。
+}
+
+func Test_SyncMap(t *testing.T) {
+	var m sync.Map
+
+	m.Store("alice", 11)
+	m.Store("bob", 12)
+	m.Store("cindy", 13)
+
+	// 1.22
+	m.Range(func(key, value any) bool {
+		fmt.Println(key, value)
+		return true
+	})
+
+	// 1.23
+	for key, val := range m.Range {
+		fmt.Println(key, val)
+	}
+
+	// iter.Seq2泛型方法迭代器，k v 2个参数，返回bool值的函数都可以使用迭代器
+	mp := maps.Collect(m.Range)
+	fmt.Println(mp)
 }
