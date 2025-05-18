@@ -1,29 +1,46 @@
 package test
 
 import (
+	"context"
 	"fmt"
-	"sync"
+	"golang.org/x/time/rate"
 	"testing"
+	"time"
 )
 
-type Request struct {
-	batchSize int
-	Lock      sync.Mutex
+var smsChan = make(chan int, 100000) // 10万缓冲
+// SendSMSHandler 生产者（接口层）
+func SendSMSHandler(params int) {
+	smsChan <- params // 非阻塞推送
 }
 
-func NewRequest(batchSize int) *Request {
-	return &Request{
-		batchSize: batchSize,
-	}
+func SendSmsProcess() {
+	go func() {
+		limiter := rate.NewLimiter(rate.Limit(1000), 1) // 每秒1000条
+		for req := range smsChan {
+			limiter.Wait(context.Background())
+			go func() {
+				fmt.Printf("1,%d\n", req)
+			}()
+		}
+	}()
 }
 
 func Test_1(t *testing.T) {
-	r := NewRequest(100)
-	r.process()
-	fmt.Println(r.batchSize)
-}
+	go func() {
+		for {
+			SendSMSHandler(1)
+			time.Sleep(time.Second)
+		}
 
-func (r *Request) process() {
-	rr := r
-	rr.batchSize = 1200
+	}()
+	SendSmsProcess()
+	go func() {
+		for req := range smsChan {
+			go func() {
+				fmt.Printf("1,%d\n", req)
+			}()
+		}
+	}()
+	select {}
 }
