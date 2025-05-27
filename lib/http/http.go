@@ -23,7 +23,7 @@ var sharedClient = &http.Client{
 type Client struct {
 	url         string
 	method      string
-	body        any
+	body        io.Reader
 	headers     map[string]string
 	contentType string
 }
@@ -42,7 +42,12 @@ func NewSmsClient(url, method string, opts ...func(*Client)) *Client {
 
 func WithBody(body any) func(*Client) {
 	return func(c *Client) {
-		c.body = body
+		if r, ok := body.(io.Reader); ok {
+			c.body = r
+		} else {
+			bt, _ := json.Marshal(body)
+			c.body = bytes.NewReader(bt)
+		}
 	}
 }
 
@@ -59,8 +64,7 @@ func WithContentType(contentType string) func(*Client) {
 }
 
 func (c *Client) Do() (respBody []byte, err error) {
-	bt, _ := json.Marshal(c.body)
-	httpReq, err := http.NewRequest(c.method, c.url, bytes.NewReader(bt))
+	httpReq, err := http.NewRequest(c.method, c.url, c.body)
 	if err != nil {
 		fmt.Printf("http.NewRequest err: %v\n", err)
 		return nil, err
