@@ -49,12 +49,15 @@ func Example_basicUsage() {
 		// 启动就先分配 采用分段环形存储结构（3个segment），当总数据量超256MB时：1. 触发近似LRU淘汰，覆盖最旧数据 2. 写入速度不受影响（无GC停顿）
 		// 条目大小限制：单个Key+Value不得超过总容量的1/1024（256MB场景下单条≤256KB）
 		// 适合存储序列化后的JSON/Protobuf等大块数据（需确保单条不超限）
+		// time.Minute代表每个缓存条目在本地缓存中的最大存活时间是1分钟。任何存储在本地缓存的数据将在 1分钟(60秒)后自动过期，到期后条目会被自动清理，下次访问时会触发重新加载，这是强制的最大生存期，
+		// 即使数据被频繁访问也会到期
 		cache.WithLocal(local.NewFreeCache(256*local.MB, time.Minute)),
 		// TinyLFU 优点：缓存命中率高 缺点：如果缓存条目过多，GC负担会比较严重 最多10000条本地缓存，
 		// 当条目数超过10000时，触发W-TinyLFU分层淘汰机制 1. 使用Count-Min Sketch统计访问频率 2. 优先淘汰低频访问的旧数据（结合LRU窗口+SLRU主区）
 		// cache.WithLocal(local.NewTinyLFU(10000, time.Minute)),
-		cache.WithCodec(json2.Name),
-		cache.WithErrNotFound(errRecordNotFound))
+		cache.WithCodec(json2.Name),              // 序列化方式 默认是msgpack.Name
+		cache.WithErrNotFound(errRecordNotFound), // 设置缓存未命中时返回的错误
+	)
 
 	ctx := context.TODO()
 	key := "mykey:1"
