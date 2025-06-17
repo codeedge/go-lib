@@ -156,7 +156,7 @@ func Example_syncLocalUsage() {
 		Password: "123456",
 	})
 
-	sourceID := "12345678" // Unique identifier for this cache instance
+	sourceID := "12345678" // Unique identifier for this cache instance  可以使用uuid
 	channelName := "syncLocalChannel"
 	pubSub := ring.Subscribe(context.Background(), channelName)
 
