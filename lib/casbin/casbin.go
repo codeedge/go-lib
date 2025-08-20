@@ -110,6 +110,13 @@ func Init(config *Config) {
 	}
 	lock.Lock()
 	defer lock.Unlock()
+
+	if config.Key == "" {
+		config.Key = _default
+	} else {
+		_default = config.Key
+	}
+
 	if _, ok := enforcerMap[config.Key]; !ok {
 		// 配置前缀，针对多个配置文件时需要指定不同的casbin表
 		prefix := ""
