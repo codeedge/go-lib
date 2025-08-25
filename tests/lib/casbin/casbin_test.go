@@ -59,6 +59,13 @@ func Test_Casbin(t *testing.T) {
 		fmt.Println("删除成功")
 	}
 
+	// 指定条件删除 从v0开始，匹配到r:1的就删除，后面可以追加domain参数按domain删除
+	role := fmt.Sprintf("r:%d", 1)
+	ok, err := e.RemoveFilteredPolicy(0, role)
+	if !ok || err != nil {
+		fmt.Printf("角色权限删除失败： res:%v,err:%v\n", ok, err)
+	}
+
 	list, err := e.GetPolicy()
 	if err != nil {
 		panic(err)
@@ -153,6 +160,36 @@ func Test_Casbin(t *testing.T) {
 	//}
 	//fmt.Println(namedGroupingPolicy2)
 
+	// 批量配置权限
+	// 对于配置角色需要配置大量数据时使用批量效率更高
+	var pers = make([][]string, 0)
+	var menuIds = []string{"1", "2", "3", "4"}
+	for _, id := range menuIds {
+		pers = append(pers, []string{role, "api", "menu", id})
+	}
+
+	if len(pers) > 0 {
+		// 配置权限
+		e := casbin.Enforcer()
+		ok, err = e.AddPolicies(pers)
+		if !ok || err != nil {
+			// 配置重复了也会返回错误，所有这里只打印返回值，不返回错误
+			fmt.Printf("角色权限配置失败：PermissionConfig.AddPolicy res:%v,err:%v\n", ok, err)
+		}
+	}
+
+	// casbin角色批量关联
+	var pers2 = make([][]string, 0)
+	var roleIds = []int{1, 2, 3}
+	for _, roleId := range roleIds {
+		pers = append(pers, []string{"1", fmt.Sprintf("r:%d", roleId), "api"})
+		pers = append(pers, []string{"1", fmt.Sprintf("r:%d", roleId), "data"})
+	}
+	b, err := e.AddGroupingPolicies(pers2)
+	if !b || err != nil {
+		fmt.Printf("用户角色关联：member.add AddGroupingPolicies res:%v,err:%v\n", b, err)
+	}
+
 	e.ClearPolicy()
 	err = e.SavePolicy()
 	if err != nil {
@@ -169,7 +206,7 @@ func Test_Casbin2(t *testing.T) {
 	}
 
 	casbin.Init(&casbin.Config{
-		Key:           "op2",
+		Key:           "op",
 		Path:          "./rbac_domain_models.conf",
 		DB:            db,
 		RedisAddr:     "192.168.1.201:6379",
@@ -245,7 +282,7 @@ func Test_Casbin3(t *testing.T) {
 	}
 
 	casbin.Init(&casbin.Config{
-		Key:           "op2",
+		Key:           "op",
 		Path:          "./rbac_domain_models.conf",
 		DB:            db,
 		RedisAddr:     "192.168.1.201:6379",
