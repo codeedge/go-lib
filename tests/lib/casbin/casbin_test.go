@@ -171,7 +171,7 @@ func Test_Casbin(t *testing.T) {
 	if len(pers) > 0 {
 		// 配置权限
 		e := casbin.Enforcer()
-		ok, err = e.AddPolicies(pers)
+		ok, err = e.AddPolicies(pers) // 这个方法如果其中有一个数据已经存在了，则直接返回false，其他的数据也不会插入。需要其他数据插入使用AddPoliciesEx方法
 		if !ok || err != nil {
 			// 配置重复了也会返回错误，所有这里只打印返回值，不返回错误
 			fmt.Printf("角色权限配置失败：PermissionConfig.AddPolicy res:%v,err:%v\n", ok, err)
