@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,8 +24,9 @@ type Service struct {
 	clientsSync           sync.RWMutex       // 读写锁
 	rdb                   *redis.Client      // Redis客户端
 	ctx                   context.Context    // 上下文
-	redisSessionKey       string             // 会话存储
-	redisSessionSetKey    string             // 节点客户端集合key
+	redisSessionKey       string             // 会话存储 记录用户-客户端对应的节点id
+	redisUserClientsKey   string             // 用户-客户端映射Key 记录用户所有的客户端id，单推时查找用户所有的客户端进行推送
+	redisSessionSetKey    string             // 节点客户端集合key 用于清理节点客户端
 	redisPubSubChannelKey string             // 发布订阅key
 	redisOfflineQueueKey  string             // 离线消息队列Key前缀
 	stopHeartbeat         chan struct{}      // 停止心跳信号
@@ -50,12 +52,13 @@ type Message struct {
 var SSE *Service
 
 const (
-	redisSessionPrefix = "sse:session:"       // 会话存储前缀
-	redisSessionSet    = "sse:node:clients:"  // 节点客户端集合前缀
-	redisPubSubChannel = "sse:cluster"        // 集群消息通道
-	redisOfflineQueue  = "sse:offline-msg"    // 离线消息队列
-	sessionTTL         = 5 * 60 * time.Second // 会话有效期
-	heartbeatInterval  = 60 * time.Second     // 心跳间隔
+	redisSessionPrefix     = "sse:session:"       // 会话存储前缀
+	redisUserClientsPrefix = "sse:user:clients:"  // 用户-客户端映射Key
+	redisSessionSet        = "sse:node:clients:"  // 节点客户端集合前缀
+	redisPubSubChannel     = "sse:cluster"        // 集群消息通道
+	redisOfflineQueue      = "sse:offline-msg"    // 离线消息队列
+	sessionTTL             = 5 * 60 * time.Second // 会话有效期
+	heartbeatInterval      = 60 * time.Second     // 心跳间隔
 )
 
 // New 创建SSE服务实例
@@ -66,6 +69,7 @@ func New(rds *redis.Client, nodeId int, redisPrefix string) *Service {
 		rdb:                   rds,
 		ctx:                   context.Background(),
 		redisSessionKey:       fmt.Sprintf("%s:%s", redisPrefix, redisSessionPrefix),
+		redisUserClientsKey:   fmt.Sprintf("%s:%s", redisPrefix, redisUserClientsPrefix),
 		redisSessionSetKey:    fmt.Sprintf("%s:%s%d", redisPrefix, redisSessionSet, nodeId),
 		redisPubSubChannelKey: fmt.Sprintf("%s:%s", redisPrefix, redisPubSubChannel),
 		redisOfflineQueueKey:  fmt.Sprintf("%s:%s", redisPrefix, redisOfflineQueue),
@@ -85,7 +89,6 @@ func New(rds *redis.Client, nodeId int, redisPrefix string) *Service {
 
 // 清理redis本节点的会话记录
 func (s *Service) cleanupStaleSessions() {
-
 	// 获取本节点在 Redis 中记录的所有客户端 ID
 	clients := s.rdb.SMembers(s.ctx, s.redisSessionSetKey).Val()
 
@@ -94,6 +97,13 @@ func (s *Service) cleanupStaleSessions() {
 	for _, clientId := range clients {
 		sessionKey := s.redisSessionKey + clientId
 		pipe.Del(s.ctx, sessionKey)
+		// 从用户对应的设备Set中移除该 clientId
+		parts := strings.Split(clientId, ":")
+		if len(parts) >= 2 { // 确保格式正确，如 "userId:uuid"
+			userId := parts[0]
+			userClientsKey := fmt.Sprintf("%s%s", s.redisUserClientsKey, userId)
+			pipe.SRem(s.ctx, userClientsKey, clientId)
+		}
 	}
 
 	// 最后删除本节点的集合
@@ -179,6 +189,11 @@ func (s *Service) registerClient(clientId string, client *Client) {
 	pipe.SAdd(s.ctx, s.redisSessionSetKey, clientId)
 	pipe.Expire(s.ctx, s.redisSessionSetKey, sessionTTL)
 
+	// 将 clientId 添加到用户对应的设备Set中
+	userClientsKey := fmt.Sprintf("%s%d", s.redisUserClientsKey, client.userId)
+	pipe.SAdd(s.ctx, userClientsKey, clientId)
+	pipe.Expire(s.ctx, userClientsKey, sessionTTL) // 保持TTL一致
+
 	_, err := pipe.Exec(s.ctx)
 	if err != nil {
 		log.Printf("Error registering client: %v", err)
@@ -229,6 +244,15 @@ func (s *Service) unregisterClient(clientId string) {
 	pipe.Del(s.ctx, sessionKey)
 	pipe.SRem(s.ctx, s.redisSessionSetKey, clientId)
 
+	// 从用户对应的设备Set中移除该 clientId
+	// 注意：需要先从 clientId 中解析出 userId
+	parts := strings.Split(clientId, ":")
+	if len(parts) >= 2 { // 确保格式正确，如 "1:uuid"
+		userId := parts[0]
+		userClientsKey := fmt.Sprintf("%s%s", s.redisUserClientsKey, userId)
+		s.rdb.SRem(s.ctx, userClientsKey, clientId)
+	}
+
 	_, err := pipe.Exec(s.ctx)
 	if err != nil {
 		log.Printf("Error unregistering client: %v", err)
@@ -260,6 +284,12 @@ func (s *Service) heartbeat() {
 			for _, clientId := range clientIds {
 				sessionKey := s.redisSessionKey + clientId
 				pipe.Expire(s.ctx, sessionKey, sessionTTL)
+				parts := strings.Split(clientId, ":")
+				if len(parts) >= 2 { // 确保格式正确，如 "1:uuid"
+					userId := parts[0]
+					userClientsKey := fmt.Sprintf("%s%s", s.redisUserClientsKey, userId)
+					pipe.Expire(s.ctx, userClientsKey, sessionTTL)
+				}
 			}
 			pipe.Expire(s.ctx, s.redisSessionSetKey, sessionTTL)
 
@@ -356,6 +386,50 @@ func (s *Service) SendToClient(msg *Message) bool {
 	return true
 }
 
+// SendToUser 向指定用户的所有在线设备发送消息（集群感知）
+func (s *Service) SendToUser(userId int64, msgData any, msgType int) {
+	// 1. 构造消息体
+	msg := &Message{
+		// ClientId 留空，因为目标是用户，不是特定设备
+		Type:      msgType,
+		Data:      msgData,
+		Timestamp: time.Now().Unix(),
+	}
+
+	// 2. 获取该用户所有的 clientId
+	userClientsKey := fmt.Sprintf("%s%d", s.redisUserClientsKey, userId)
+	clientIds, err := s.rdb.SMembers(s.ctx, userClientsKey).Result()
+	if err != nil {
+		log.Printf("Error getting client list for user %d: %v", userId, err)
+		return
+	}
+
+	if len(clientIds) == 0 {
+		// 用户所有设备都不在线，可以选择存入离线消息
+		data, err := json.Marshal(msg)
+		if err != nil {
+			fmt.Println("json.Marshal err:", err)
+			return
+		}
+		s.storeOfflineMessage(strconv.FormatInt(userId, 10), data)
+		return
+	}
+
+	// 3. 遍历所有 clientId，发送消息
+	for _, targetClientId := range clientIds {
+		// 为每个目标设备构造一个目标明确的消息
+		targetMsg := &Message{
+			ClientId:  targetClientId, // 这里指定具体的设备
+			NodeId:    msg.NodeId,
+			Type:      msg.Type,
+			Data:      msg.Data,
+			Timestamp: msg.Timestamp,
+		}
+		// 调用单播发送逻辑，这会处理节点路由
+		s.SendToClient(targetMsg)
+	}
+}
+
 // BroadcastMessage 向所有客户端广播消息
 func (s *Service) BroadcastMessage(msg *Message) {
 	// 创建广播消息
@@ -382,22 +456,21 @@ func (s *Service) deliverToClient(msg *Message) {
 		client.messageChan <- msg
 	} else {
 		// 用户不在线则保存到离线消息
-		s.storeOfflineMessage(msg.ClientId, data)
+		userClientId := strings.Split(msg.ClientId, ":")
+		if len(userClientId) == 2 {
+			s.storeOfflineMessage(userClientId[0], data)
+		}
 	}
 }
 
 // storeOfflineMessage 将消息存入用户的离线队列 (Redis List)
-func (s *Service) storeOfflineMessage(clientId string, messageData []byte) bool {
-	userClientId := strings.Split(clientId, ":")
-	if len(userClientId) != 2 {
-		return false
-	}
+func (s *Service) storeOfflineMessage(userId string, messageData []byte) bool {
 	// 为每个用户创建一个独立的List
-	userOfflineQueueKey := fmt.Sprintf("%s:%s", s.redisOfflineQueueKey, userClientId[0])
+	userOfflineQueueKey := fmt.Sprintf("%s:%s", s.redisOfflineQueueKey, userId)
 	// 使用LPUSH将消息存入列表头部，并设置整个Key的TTL
 	err := s.rdb.LPush(s.ctx, userOfflineQueueKey, messageData).Err()
 	if err != nil {
-		log.Printf("Failed to store offline message for %s: %v", userClientId[0], err)
+		log.Printf("Failed to store offline message for %s: %v", userId, err)
 		return false
 	}
 	return true

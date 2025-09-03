@@ -11,10 +11,6 @@ func Test1(t *testing.T) {
 		Type: 1,
 		Data: "群发",
 	})
-	SSE.SendToClient(&Message{
-		ClientId: "0:123456",
-		Type:     2,
-		Data:     "私聊",
-	})
+	SSE.SendToUser(1, "私聊", 2)
 	SSE.Close()
 }
