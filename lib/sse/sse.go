@@ -359,8 +359,8 @@ func (s *Service) subscribeChannel(_msg *redis.Message) {
 	}
 }
 
-// SendToClient 向指定客户端发送消息（集群感知）
-func (s *Service) SendToClient(msg *Message) bool {
+// 向指定客户端发送消息（集群感知）
+func (s *Service) sendToClient(msg *Message) bool {
 	// 查找客户端所在节点
 	sessionKey := s.redisSessionKey + msg.ClientId
 	var nodeId = -1 // 节点id从0开始，设置-1防止和空值混淆
@@ -426,18 +426,21 @@ func (s *Service) SendToUser(userId int64, msgData any, msgType int) {
 			Timestamp: msg.Timestamp,
 		}
 		// 调用单播发送逻辑，这会处理节点路由
-		s.SendToClient(targetMsg)
+		s.sendToClient(targetMsg)
 	}
 }
 
 // BroadcastMessage 向所有客户端广播消息
-func (s *Service) BroadcastMessage(msg *Message) {
-	// 创建广播消息
-	msg.Timestamp = time.Now().Unix()
-
-	msgData, _ := json.Marshal(msg)
+func (s *Service) BroadcastMessage(msgData any, msgType int) {
+	// 1. 构造消息体
+	msg := &Message{
+		Type:      msgType,
+		Data:      msgData,
+		Timestamp: time.Now().Unix(),
+	}
+	data, _ := json.Marshal(msg)
 	// 给所有节点推送
-	s.rdb.Publish(s.ctx, s.redisPubSubChannelKey, string(msgData))
+	s.rdb.Publish(s.ctx, s.redisPubSubChannelKey, string(data))
 }
 
 // 发送消息到指定客户端
