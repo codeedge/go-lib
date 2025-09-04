@@ -405,9 +405,11 @@ func (s *Service) subscribeChannel(_msg *redis.Message) {
 	if msg.UserId == 0 {
 		for userId, client := range s.clients {
 			for uuid, _ := range client {
-				msg.UserId = userId
-				msg.Uuid = uuid
-				s.deliverToClient(&msg)
+				// 创建消息副本，避免修改原始消息
+				_msg := msg
+				_msg.UserId = userId
+				_msg.Uuid = uuid
+				s.deliverToClient(&_msg)
 			}
 		}
 	} else {
