@@ -18,6 +18,60 @@ import (
 	"time"
 )
 
+/*
+SSE (Server-Sent Events) 服务包是一个基于 Go 语言的库，专为现代分布式系统设计。它使服务器能通过一个持续的 HTTP 连接向客户端（如浏览器）主动、单向地
+实时推送数据（如通知、消息、实时指标）。其最大特点是原生支持集群部署和跨项目/服务的安全消息推送，无需客户端轮询，非常适合微服务架构。
+
+📦 核心功能
+功能特性						说明
+集群支持 (Cluster Support)	多节点部署，通过 Redis 同步会话和路由消息，实现高可用和水平扩展。
+跨服务推送 (Cross-Service)	服务A（如运营平台）可直接、精准地向服务B（如客户端）的特定用户或所有用户推送消息。
+离线消息 (Offline Support)	用户不在线时，消息自动持久化至 Redis。用户重连后，立即接收错过的消息。
+多端登录 (Multi-Device)		支持同一用户（userId）在多个设备（uuid）同时在线并接收消息。
+
+这份文档清晰介绍了你的SSE服务包。我帮你提炼了核心要点，使其更简洁易读。
+
+🎯 核心价值
+你的 SSE (Server-Sent Events) 服务包是一个基于 Go 语言的库，专为现代分布式系统设计。它使服务器能通过一个持续的 HTTP 连接向客户端（如浏览器）主动、单向地实时推送数据（如通知、消息、实时指标）。其最大特点是原生支持集群部署和跨项目/服务的安全消息推送，无需客户端轮询，非常适合微服务架构。
+
+📦 核心功能
+功能特性	说明
+集群支持 (Cluster Support)	多节点部署，通过 Redis 同步会话和路由消息，实现高可用和水平扩展。
+跨服务推送 (Cross-Service)	服务A（如运营平台）可直接、精准地向服务B（如客户端）的特定用户或所有用户推送消息。
+离线消息 (Offline Support)	用户不在线时，消息自动持久化至 Redis。用户重连后，立即接收错过的消息。
+多端登录 (Multi-Device)	支持同一用户（userId）在多个设备（uuid）同时在线并接收消息。
+其基本工作原理如下，确保了消息的精准投递：
+
+
+🛠️ 如何使用
+1.初始化：传入 Redis 客户端、节点ID、当前服务名和允许推送的远程服务名列表。
+sseService := sse.New(redisClient, 1, "my-app", "operation-platform", "client-app")
+2.处理客户端连接：在 Gin 路由中提供一个端点。
+router.GET("/sse", sseService.Connect)
+3.发送消息：
+// 1. 向本服务的用户123发送消息
+sseService.SendToUser(123, "Hello!", 1)
+// 2. 向本服务所有用户广播
+sseService.BroadcastMessage("Hello, everyone!", 2)
+// 3. 向远程服务 "client-app" 的用户123发送消息
+sseService.SendToUser(123, "Cross-service msg", 1, "client-app")
+// 4. 向远程服务 "operation-platform" 广播消息
+sseService.BroadcastMessage("Broadcast to all", 3, "operation-platform")
+⚙️ 部署注意
+Redis：所有节点和服务必须连接同一个 Redis 实例或集群，这是功能基础。
+反向代理 (Nginx)：若使用 Nginx，必须为 SSE 路径配置长连接与禁用缓冲：
+location /sse/ {
+    proxy_pass http://your_upstream;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 86400s;
+}
+监控：关注 Redis 内存和节点连接数。
+💎 总结
+此 SSE 服务包是构建实时通知系统（如聊天消息、订单状态更新）、实时数据看板（如监控指标、股票行情）和跨服务实时通信的理想选择。它基于 HTTP 标准，开箱即用，
+并能通过集群和精准的路由能力，支撑大规模、分布式的应用场景。
+*/
+
 type Service struct {
 	nodeId                       int                          // 节点id
 	clients                      map[int64]map[string]*Client // 存储所有本地客户端连接 map[uid]map[uuid]*Client
