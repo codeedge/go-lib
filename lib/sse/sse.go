@@ -98,8 +98,8 @@ type Client struct {
 
 // Message 集群节点间传输的消息格式
 type Message struct {
-	UserId     int64  // 用户id
-	Uuid       string // 设备唯一id
+	UserId     int64  `json:"user_id"`     // 用户id
+	Uuid       string `json:"uuid"`        // 设备唯一id
 	NodeId     int    `json:"node_id"`     // 服务器节点Id
 	ServerName string `json:"server_name"` // 服务名
 	Type       int    `json:"type"`        // 类型
@@ -357,6 +357,7 @@ func (s *Service) BroadcastMessage(msgData any, msgType int, serverNames ...stri
 	var serverList = s.getServerNames(serverNames...)
 	for _, serverName := range serverList { // 1. 构造消息体
 		msg := &Message{
+			NodeId:     -1,
 			ServerName: serverName,
 			Type:       msgType,
 			Data:       msgData,
