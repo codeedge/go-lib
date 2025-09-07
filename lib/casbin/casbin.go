@@ -126,34 +126,46 @@ func Init(config *Config) {
 
 		a, err := gormadapter.NewAdapterByDBUseTableName(config.DB, prefix, "casbin_rule")
 		if err != nil {
-			fmt.Sprintf("casbin连接数据库错误: %v", err)
-			panic(err)
+			fmt.Printf("casbin连接数据库错误: %v\n", err)
+			return
 		}
 
 		e, err := casbin.NewSyncedEnforcer(config.Path, a)
 		if err != nil {
-			fmt.Sprintf("初始化casbin错误: %v", err)
-			panic(err)
+			fmt.Printf("初始化casbin错误: %v\n", err)
+			return
 		}
 		// 配置自动同步（示例：每隔30秒自动加载策略） 会定期全表刷新，对数据库压力较大，使用下面的监听刷新模式
 		//e.StartAutoLoadPolicy(30 * time.Second)
 
 		if config.RedisAddr != "" {
 			// 配置Watcher监听策略变更（如Redis） https://github.com/casbin/redis-watcher
-			watcher, _ := rediswatcher.NewWatcher(config.RedisAddr, rediswatcher.WatcherOptions{
+			watcher, err := rediswatcher.NewWatcher(config.RedisAddr, rediswatcher.WatcherOptions{
 				Options: redis.Options{
 					Network:  "tcp",
 					Password: config.RedisPassword,
 				},
 				Channel: "/casbin",
+				//OptionalUpdateCallback: rediswatcher.DefaultUpdateCallback(e),// 设置回调函数 或者写在下面的SetUpdateCallback
 				// Only exists in test, generally be true
 				IgnoreSelf: true})
-			e.SetWatcher(watcher)
+			if err != nil {
+				fmt.Printf("rediswatcher.NewWatcher err: %v\n", err)
+				return
+			}
+			err = e.SetWatcher(watcher)
+			if err != nil {
+				fmt.Printf("rediswatcher.SetWatcher err: %v\n", err)
+				return
+			}
+			// 设置回调函数
+			err = watcher.SetUpdateCallback(rediswatcher.DefaultUpdateCallback(e))
+			if err != nil {
+				fmt.Printf("rediswatcher.SetUpdateCallback err: %v\n", err)
+				return
+			}
 		}
 
-		if config.Key == "" {
-			config.Key = _default
-		}
 		enforcerMap[config.Key] = e
 	}
 }
