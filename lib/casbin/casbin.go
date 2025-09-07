@@ -139,13 +139,13 @@ func Init(config *Config) {
 		//e.StartAutoLoadPolicy(30 * time.Second)
 
 		if config.RedisAddr != "" {
-			// 配置Watcher监听策略变更（如Redis） https://github.com/casbin/redis-watcher
+			// 配置Watcher监听策略变更（如Redis） redis集群模式使用NewWatcherWithCluster方法 https://github.com/casbin/redis-watcher
 			watcher, err := rediswatcher.NewWatcher(config.RedisAddr, rediswatcher.WatcherOptions{
 				Options: redis.Options{
 					Network:  "tcp",
 					Password: config.RedisPassword,
 				},
-				Channel: "/casbin",
+				Channel: fmt.Sprintf("/casbin:%s", config.Key),
 				//OptionalUpdateCallback: rediswatcher.DefaultUpdateCallback(e),// 设置回调函数 或者写在下面的SetUpdateCallback
 				// Only exists in test, generally be true
 				IgnoreSelf: true})
