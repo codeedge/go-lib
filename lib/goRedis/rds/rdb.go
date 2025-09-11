@@ -50,6 +50,17 @@ func setRedsync() {
 	Rs = redsync.New(pool)
 }
 
+// NewMutex 设置分布式锁 配置重试3次，重试延迟50毫秒 默认的锁会重试32次，响应过慢
+func NewMutex(name string, options ...redsync.Option) *redsync.Mutex {
+	opts := []redsync.Option{
+		redsync.WithTries(3), redsync.WithRetryDelay(time.Millisecond * 50),
+	}
+	if len(options) > 0 {
+		opts = append(opts, options...)
+	}
+	return Rs.NewMutex(name, opts...)
+}
+
 // LockExtend 创建带续租的分布式锁并执行任务
 // 适合场景：分布式系统并发时只允许一个进程执行一些耗时操作，无法保证锁在释放前执行完，需要给锁续租，直到程序执行完后释放锁，并停止续租
 // lockKey 锁的key
