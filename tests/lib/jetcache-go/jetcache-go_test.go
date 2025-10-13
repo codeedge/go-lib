@@ -204,7 +204,7 @@ func Example_syncLocalUsage() {
 // 模拟从数据库获取数据
 func mockDBGetObject(ctx context.Context, id int) (*object, error) {
 	if id > 100 {
-		return nil, errRecordNotFound
+		return nil, errRecordNotFound // 如果不使用errRecordNotFound，也可以定义个默认值代表空，判断是不是默认值来判断是不是有数据
 	}
 	return &object{Str: "mystring", Num: id}, nil
 }
