@@ -138,21 +138,6 @@ func LockAwaitOnce(lockKey string, expiry time.Duration, task func(), clear ...f
 			// 创建通道用于协调续租协程
 			renewalFailed := make(chan struct{})
 
-			// 开启一个goroutine，周期性地续租锁
-			go func() {
-				ticker := time.NewTicker(expiry / 2) // 按照需求调整 每隔过期时间的一半续租一次
-				defer ticker.Stop()
-
-				for range ticker.C {
-					ok, err := mutex.Extend()
-					if !ok || err != nil {
-						log.Printf("LockAwaitOnce Failed to extend lock: ok:%v err:%v time:%v", ok, err, time.Now().Format(time.RFC3339Nano))
-						close(renewalFailed) // 通知主协程续租失败
-						return
-					}
-				}
-			}()
-
 			go func() {
 				// 任务完成后的处理
 				// 任务完成后，阻塞等待，直到收到续租失败的信号
@@ -166,6 +151,21 @@ func LockAwaitOnce(lockKey string, expiry time.Duration, task func(), clear ...f
 						log.Printf("LockAwaitOnce Failed to unlock after extend failure: ok:%v err:%v time:%v", unlockOk, unlockErr, time.Now().Format(time.RFC3339Nano))
 					}
 					return
+				}
+			}()
+
+			// 开启一个goroutine，周期性地续租锁
+			go func() {
+				ticker := time.NewTicker(expiry / 2) // 按照需求调整 每隔过期时间的一半续租一次
+				defer ticker.Stop()
+
+				for range ticker.C {
+					ok, err := mutex.Extend()
+					if !ok || err != nil {
+						log.Printf("LockAwaitOnce Failed to extend lock: ok:%v err:%v time:%v", ok, err, time.Now().Format(time.RFC3339Nano))
+						close(renewalFailed) // 通知主协程续租失败
+						return
+					}
 				}
 			}()
 
