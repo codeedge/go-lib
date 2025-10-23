@@ -120,49 +120,70 @@ func LockExtend(lockKey string, expiry time.Duration, task func()) {
 // task 执行的任务
 // clear 在续期失败时清理执行的任务，比如清理定时任务，防止续期失败后其他机器和本机器多次执行了定时任务
 func LockAwaitOnce(lockKey string, expiry time.Duration, task func(), clear ...func()) {
-	if expiry < 1 {
-		expiry = 10 * time.Second
-	}
-	// 创建一个带有过期时间的互斥锁 设置重试3次，重试之间等待的时间长度50毫秒
-	mutex := Rs.NewMutex(lockKey, redsync.WithExpiry(expiry), redsync.WithTries(3), redsync.WithRetryDelay(time.Millisecond*50))
-	// 一直循环尝试获取锁，获取成功则执行任务
-	for {
-		if err := mutex.Lock(); err != nil {
-			// 获取失败睡眠一半的时间再重试
-			time.Sleep(expiry / 2)
-			continue
+	go func() {
+		if expiry < 1 {
+			expiry = 10 * time.Second
 		}
+		// 创建一个带有过期时间的互斥锁 设置重试3次，重试之间等待的时间长度50毫秒
+		mutex := Rs.NewMutex(lockKey, redsync.WithExpiry(expiry), redsync.WithTries(3), redsync.WithRetryDelay(time.Millisecond*50))
+		// 一直循环尝试获取锁，获取成功则执行任务
+		for {
+			if err := mutex.Lock(); err != nil {
+				// 获取失败睡眠一半的时间再重试
+				time.Sleep(expiry / 2)
+				continue
+			}
 
-		// 开启一个goroutine，周期性地续租锁
-		go func() {
-			ticker := time.NewTicker(expiry / 2) // 按照需求调整 每隔过期时间的一半续租一次
-			defer ticker.Stop()
+			log.Printf("LockAwaitOnce mutex.Lock() 得到锁 time:%v", time.Now().Format(time.RFC3339Nano))
+			// 创建通道用于协调续租协程
+			renewalFailed := make(chan struct{})
 
-			for range ticker.C {
-				ok, err := mutex.Extend()
-				if !ok || err != nil {
-					log.Printf("Failed to extend lock: ok:%v err:%v", ok, err)
+			// 开启一个goroutine，周期性地续租锁
+			go func() {
+				ticker := time.NewTicker(expiry / 2) // 按照需求调整 每隔过期时间的一半续租一次
+				defer ticker.Stop()
+
+				for range ticker.C {
+					ok, err := mutex.Extend()
+					if !ok || err != nil {
+						log.Printf("LockAwaitOnce Failed to extend lock: ok:%v err:%v time:%v", ok, err, time.Now().Format(time.RFC3339Nano))
+						close(renewalFailed) // 通知主协程续租失败
+						return
+					}
+				}
+			}()
+
+			go func() {
+				// 任务完成后的处理
+				// 任务完成后，阻塞等待，直到收到续租失败的信号
+				select {
+				case <-renewalFailed:
 					if len(clear) > 0 {
 						clear[0]()
 					}
+					// 主动释放锁，避免死锁
+					if unlockOk, unlockErr := mutex.Unlock(); !unlockOk || unlockErr != nil {
+						log.Printf("LockAwaitOnce Failed to unlock after extend failure: ok:%v err:%v time:%v", unlockOk, unlockErr, time.Now().Format(time.RFC3339Nano))
+					}
 					return
 				}
-			}
-		}()
-
-		// 执行需要锁的工作，使用匿名函数来限制 recover 的作用域
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("Task panic recovered: %v, key: %s", r, lockKey)
-				}
 			}()
-			task()
-		}()
 
-		// 获取成功后不用退出循环，这样本机如果续期失败还可以继续尝试参与进来，可以把过期时间设置久一点，这样请求redis的频率就低了。
-		//return
-	}
+			// 执行需要锁的工作，使用匿名函数来限制 recover 的作用域
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("LockAwaitOnce Task panic recovered: %v, key: %s time:%v", r, lockKey, time.Now().Format(time.RFC3339Nano))
+						close(renewalFailed) // 通知主协程续租失败
+					}
+				}()
+				task()
+			}()
+
+			// 获取成功后不用退出循环，这样本机如果续期失败还可以继续尝试参与进来，可以把过期时间设置久一点，这样请求redis的频率就低了。
+			// return
+		}
+	}()
 }
 
 // Join 拼接cacheKey
