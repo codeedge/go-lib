@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"github.com/go-redsync/redsync/v4"
 	"github.com/go-redsync/redsync/v4/redis/goredis/v9"
+	"github.com/golang/groupcache/consistenthash"
 	"github.com/redis/go-redis/v9"
+	"hash/crc32"
 	"log"
 	"strings"
 	"time"
 )
+
+// goredis文档 https://redis.uptrace.dev/zh/guide/go-redis.html
 
 var Rdb *redis.Client
 var Rs *redsync.Redsync
@@ -28,12 +32,25 @@ func Init(options *redis.Options) {
 	}
 }
 
-// InitFailover 哨兵模式
+// 主从模式说明：https://cloud.tencent.com/developer/article/2169883
+// 2.1 主从模式简介
+// 主从模式是三种模式中最简单的，在主从复制中，数据库分为两类：主数据库(master)和从数据库(slave)。其中，主从复制有如下特点：
+// 主数据库可以进行读写操作，当读写操作导致数据变化时会自动将数据同步给从数据库；
+// 从数据库一般是只读的，并且接收主数据库同步过来的数据；
+// 一个master可以拥有多个slave，但是一个slave只能对应一个master；
+// slave挂了不影响其他slave的读和master的读和写，重新启动后会将数据从master同步过来；
+// master挂了以后，不影响slave的读，但redis不再提供写服务，master重启后redis将重新对外提供写服务；
+// master挂了以后，不会在slave节点中重新选一个master；
+// 主从模式的弊端就是不具备高可用性，当master挂掉以后，Redis将不能再对外提供写入操作，因此sentinel哨兵模式应运而生。
+// 主从模式需要配置多个地址分别初始化单节点redis即redis.NewClient，写的时候使用主节点，读的时候使用从节点，主节点挂了则服务不可用，无法更新数据。
+// 所以最好是使用哨兵或者集群模式。
+
+// InitFailover 哨兵模式1
 func InitFailover(options *redis.FailoverOptions) {
-	//&redis.FailoverOptions{
+	// &redis.FailoverOptions{
 	//	MasterName:    "master-name",
 	//	SentinelAddrs: []string{":9126", ":9127", ":9128"},
-	//}
+	// }
 	Rdb := redis.NewFailoverClient(options)
 	pong, err := Rdb.Ping(context.Background()).Result()
 	if errors.Is(err, redis.Nil) {
@@ -43,6 +60,139 @@ func InitFailover(options *redis.FailoverOptions) {
 	} else {
 		log.Printf("redis-init:%v\n", pong)
 	}
+}
+
+// InitFailoverCluster 哨兵模式2
+// 从 go-redis v8 版本开始，你可以尝试使用 NewFailoverClusterClient 把只读命令路由到从节点，请注意，
+// NewFailoverClusterClient 借助了 Cluster Client 实现，不支持 DB 选项（只能操作 DB 0）：
+func InitFailoverCluster(options *redis.FailoverOptions) {
+	// options = &redis.FailoverOptions{
+	//	MasterName:    "master-name",
+	//	SentinelAddrs: []string{":9126", ":9127", ":9128"},
+	//
+	//	// 你可以选择把只读命令路由到最近的节点，或者随机节点，二选一
+	//	//RouteByLatency: true,// 最近的节点
+	//	//RouteRandomly:  true,// 随机节点
+	// }
+	Rdb := redis.NewFailoverClusterClient(options)
+	pong, err := Rdb.Ping(context.Background()).Result()
+	if errors.Is(err, redis.Nil) {
+		fmt.Errorf("redis异常:%v", err)
+	} else if err != nil {
+		fmt.Errorf("redis失败:%v", err)
+	} else {
+		log.Printf("redis-init:%v\n", pong)
+	}
+}
+
+// InitCluster 集群模式
+// go-redis 支持 Redis Cluster 客户端，如下面示例，redis.ClusterClient 表示集群对象，对集群内每个 redis 节点使用 redis.Client 对象进行通信，
+// 每个 redis.Client 会拥有单独的连接池。
+func InitCluster(options *redis.ClusterOptions) {
+	// options = &redis.ClusterOptions{
+	//	Addrs: []string{":7000", ":7001", ":7002", ":7003", ":7004", ":7005"},
+	// }
+	Rdb := redis.NewClusterClient(options)
+	// 遍历每个节点：
+	err := Rdb.ForEachShard(context.Background(), func(ctx context.Context, shard *redis.Client) error {
+		return shard.Ping(ctx).Err()
+	})
+	if errors.Is(err, redis.Nil) {
+		fmt.Errorf("redis异常:%v", err)
+	} else if err != nil {
+		fmt.Errorf("redis失败:%v", err)
+	}
+
+	// 只遍历主节点请使用： ForEachMaster， 只遍历从节点请使用： ForEachSlave
+	// 你也可以自定义的设置每个节点的初始化:
+	Rdb = redis.NewClusterClient(&redis.ClusterOptions{
+		NewClient: func(opt *redis.Options) *redis.Client {
+			// user, pass := userPassForAddr(opt.Addr)
+			// opt.Username = user
+			// opt.Password = pass
+
+			return redis.NewClient(opt)
+		},
+	})
+}
+
+// InitRing 分片模式
+// Ring 分片客户端，是采用了一致性 HASH 算法在多个 redis 服务器之间分发 key，每个节点承担一部分 key 的存储。
+// Ring 客户端会监控每个节点的健康状况，并从 Ring 中移除掉宕机的节点，当节点恢复时，会再加入到 Ring 中。这样实现了可用性和容错性，
+// 但节点和节点之间没有一致性，仅仅是通过多个节点分摊流量的方式来处理更多的请求。如果你更注重一致性、分区、安全性，请使用 Redis Cluster。
+func InitRing(options *redis.RingOptions) {
+	// 创建一个由三个节点组成的 Ring 客户端，更多设置请参照 redis.RingOptions:
+	options = &redis.RingOptions{
+		Addrs: map[string]string{
+			// shardName => host:port
+			"shard1": "localhost:7000",
+			"shard2": "localhost:7001",
+			"shard3": "localhost:7002",
+		},
+	}
+	Rdb := redis.NewRing(options)
+	// 你可以像其他客户端一样执行命令：
+	if err := Rdb.Set(context.Background(), "foo", "bar", 0).Err(); err != nil {
+		panic(err)
+	}
+
+	// 遍历每个节点:
+	err := Rdb.ForEachShard(context.Background(), func(ctx context.Context, shard *redis.Client) error {
+		return shard.Ping(ctx).Err()
+	})
+	if errors.Is(err, redis.Nil) {
+		fmt.Errorf("redis异常:%v", err)
+	} else if err != nil {
+		fmt.Errorf("redis失败:%v", err)
+	}
+
+	// 节点选项配置
+	// 你可以手动设置连接节点，例如设置用户名和密码：
+	Rdb = redis.NewRing(&redis.RingOptions{
+		NewClient: func(opt *redis.Options) *redis.Client {
+			// user, pass := userPassForAddr(opt.Addr)
+			// opt.Username = user
+			// opt.Password = pass
+
+			return redis.NewClient(opt)
+		},
+	})
+
+	// 自定义 Hash 算法
+	// go-redis 默认使用 Rendezvous Hash 算法将 Key 分布到多个节点上，你可以更改为其他 Hash 算法：
+
+	Rdb = redis.NewRing(&redis.RingOptions{
+		NewConsistentHash: func(shards []string) redis.ConsistentHash {
+			return consistenthash.New(100, crc32.ChecksumIEEE)
+		},
+	})
+}
+
+// InitUniversal Go Redis Universal 通用客户端
+// UniversalClient 并不是一个客户端，而是对 Client 、 ClusterClient 、 FailoverClient 客户端的包装。
+// 根据不同的选项，客户端的类型如下：
+// 1.如果指定了 MasterName 选项，则返回 FailoverClient 哨兵客户端。
+// 2.如果 Addrs 是 2 个以上的地址，则返回 ClusterClient 集群客户端。
+// 3.其他情况，返回 Client 单节点客户端。
+func InitUniversal(options *redis.UniversalOptions) {
+	// 示例如下，更多设置请参照 redis.UniversalOptions:
+	var rdb redis.UniversalClient
+	rdb = redis.NewUniversalClient(&redis.UniversalOptions{
+		Addrs: []string{":6379"},
+	})
+
+	// *redis.ClusterClient.
+	rdb = redis.NewUniversalClient(&redis.UniversalOptions{
+		Addrs: []string{":6379", ":6380"},
+	})
+
+	// *redis.FailoverClient.
+	rdb = redis.NewUniversalClient(&redis.UniversalOptions{
+		Addrs:      []string{":6379"},
+		MasterName: "mymaster",
+	})
+
+	rdb.Ping(context.Background())
 }
 
 func setRedsync() {

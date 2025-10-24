@@ -20,10 +20,12 @@ require (
 	github.com/gogf/gf/v2 v2.9.0
 	github.com/gogf/guuid v1.0.0
 	github.com/golang-jwt/jwt v3.2.2+incompatible
+	github.com/golang/groupcache v0.0.0-20160516000752-02826c3e7903
 	github.com/google/wire v0.6.0
 	github.com/jinzhu/copier v0.4.0
 	github.com/mgtv-tech/jetcache-go v1.2.4
-	github.com/panjf2000/ants/v2 v2.11.2
+	github.com/panjf2000/ants/v2 v2.11.3
+	github.com/panjf2000/gnet/v2 v2.9.4
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/redis/go-redis/v9 v9.7.3
@@ -129,7 +131,7 @@ require (
 	golang.org/x/exp v0.0.0-20240904232852-e7e105dedf7e // indirect
 	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/sync v0.13.0 // indirect
-	golang.org/x/sys v0.29.0 // indirect
+	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
 	google.golang.org/genproto v0.0.0-20190819201941-24fa4b261c55 // indirect
 	google.golang.org/grpc v1.26.0 // indirect
