@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"math/rand"
+	"slices"
 	"sort"
 	"time"
 
@@ -173,7 +174,7 @@ func StringsTruncate(str, rep string, limit int) (dst string) {
 //	参数：lat1纬度1 lng1经度1 lat2纬度2 lng2经度2
 //	返回距离 米
 func EarthDistance(lat1, lng1, lat2, lng2 float64) int {
-	//log.Println(lat1, lng1, lat2, lng2)
+	// log.Println(lat1, lng1, lat2, lng2)
 	radius := 6378137.00 // 6378137
 	rad := math.Pi / 180.0
 
@@ -220,29 +221,29 @@ func GetIntersection(arrays ...[]string) []string {
 
 // Arrcmp 查找两个数组的异同
 func Arrcmp(src []int64, dest []int64) ([]int64, []int64) {
-	msrc := make(map[int64]byte) //按源数组建索引
-	mall := make(map[int64]byte) //源+目所有元素建索引
-	var set []int64              //交集
-	//1.源数组建立map
+	msrc := make(map[int64]byte) // 按源数组建索引
+	mall := make(map[int64]byte) // 源+目所有元素建索引
+	var set []int64              // 交集
+	// 1.源数组建立map
 	for _, v := range src {
 		msrc[v] = 0
 		mall[v] = 0
 	}
-	//2.目数组中，存不进去，即重复元素，所有存不进去的集合就是并集
+	// 2.目数组中，存不进去，即重复元素，所有存不进去的集合就是并集
 	for _, v := range dest {
 		l := len(mall)
 		mall[v] = 1
-		if l != len(mall) { //长度变化，即可以存
+		if l != len(mall) { // 长度变化，即可以存
 			l = len(mall)
-		} else { //存不了，进并集
+		} else { // 存不了，进并集
 			set = append(set, v)
 		}
 	}
-	//3.遍历交集，在并集中找，找到就从并集中删，删完后就是补集（即并-交=所有变化的元素）
+	// 3.遍历交集，在并集中找，找到就从并集中删，删完后就是补集（即并-交=所有变化的元素）
 	for _, v := range set {
 		delete(mall, v)
 	}
-	//4.此时，mall是补集，所有元素去源中找，找到就是删除的，找不到的必定能在目数组中找到，即新加的
+	// 4.此时，mall是补集，所有元素去源中找，找到就是删除的，找不到的必定能在目数组中找到，即新加的
 	var added, deleted []int64
 	for v, _ := range mall {
 		_, exist := msrc[v]
@@ -253,4 +254,16 @@ func Arrcmp(src []int64, dest []int64) ([]int64, []int64) {
 		}
 	}
 	return added, deleted
+}
+
+// SliceDel 删除切片中的元素
+func SliceDel[S ~[]E, E comparable](s S, v E) (res S) {
+	// 找到v.GroupID在clearGroups中的索引
+	idx := slices.Index(s, v) // slices.Index也是Go 1.21+新增的，用于查找元素索引
+	if idx != -1 {            // 确保元素存在
+		// 删除索引idx处的元素（删除区间为[idx, idx+1)）
+		res = slices.Delete(s, idx, idx+1)
+		return res
+	}
+	return s
 }

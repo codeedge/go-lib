@@ -3,7 +3,7 @@ package goftp
 import (
 	"fmt"
 	"github.com/codeedge/go-lib/lib/util"
-	"github.c
+	"github.com/gogf/gf/v2/os/gtime"
 	"testing"
 )
 
