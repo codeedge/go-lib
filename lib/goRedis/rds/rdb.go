@@ -245,13 +245,13 @@ func LockExtend(lockKey string, expiry time.Duration, task func()) {
 	}
 	mutex := Rs.NewMutex(lockKey, redsync.WithExpiry(expiry)) // 创建一个带有过期时间的互斥锁
 	if err := mutex.Lock(); err != nil {
-		log.Println(err)
+		log.Printf("LockExtend lock lockKey:%s err: %v\n", lockKey, err)
 		return //  锁获取失败直接退出
 	}
 
 	done := make(chan bool)
 
-	// 开启一个goroutine，周期性地续租锁
+	// 1.开启一个goroutine，周期性地续租锁
 	go func() {
 		ticker := time.NewTicker(expiry / 2) // 按照需求调整 每隔过期时间的一半续租一次
 		defer ticker.Stop()
@@ -261,7 +261,7 @@ func LockExtend(lockKey string, expiry time.Duration, task func()) {
 			case <-ticker.C:
 				ok, err := mutex.Extend()
 				if !ok || err != nil {
-					log.Printf("Failed to extend lock: ok:%v err:%v", ok, err)
+					log.Printf("LockExtend extend lock: ok:%v err:%v\n", ok, err)
 					return
 				}
 			case <-done:
@@ -270,15 +270,24 @@ func LockExtend(lockKey string, expiry time.Duration, task func()) {
 		}
 	}()
 
-	// 执行需要锁的工作
-	task()
+	// 2. 使用defer和recover确保资源清理
+	defer func() {
+		// 通知goRoutine停止续租
+		close(done)
 
-	// 通知goRoutine停止续租
-	close(done)
-	// Release the lock so other processes or threads can obtain a lock.
-	if ok, err := mutex.Unlock(); !ok || err != nil {
-		log.Println("unlock failed")
-	}
+		// 释放锁
+		if ok, err := mutex.Unlock(); !ok || err != nil {
+			log.Printf("LockExtend unlock failed ok:%v,err:%v\n", ok, err)
+		}
+
+		// panic处理
+		if p := recover(); p != nil {
+			log.Printf("LockExtend: task panic: %v", p)
+		}
+	}()
+
+	// 3. 执行任务
+	task() // 如果task内部发生panic，程序流会立即跳转到上面的defer块
 }
 
 // LockAwaitOnce 创建带续租的分布式锁并执行任务，等待执行，一直循环获取锁直到获得成功
