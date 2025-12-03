@@ -239,21 +239,32 @@ func NewMutex(name string, options ...redsync.Option) *redsync.Mutex {
 // lockKey 锁的key
 // expiry 锁的过期时间
 // task 执行的任务
-func LockExtend(lockKey string, expiry time.Duration, task func()) {
+func LockExtend(lockKey string, expiry time.Duration, task func(), timeouts ...time.Duration) {
+	// 1. 设置默认值
 	if expiry < 1 {
 		expiry = 10 * time.Second
 	}
-	mutex := Rs.NewMutex(lockKey, redsync.WithExpiry(expiry)) // 创建一个带有过期时间的互斥锁
-	if err := mutex.Lock(); err != nil {
-		log.Printf("LockExtend lock lockKey:%s err: %v\n", lockKey, err)
-		return //  锁获取失败直接退出
+
+	var timeout = time.Minute * 5 // 默认5分钟
+	// 任务超时时间必须大于0
+	if len(timeouts) > 0 {
+		timeout = timeouts[0]
 	}
 
-	done := make(chan bool)
+	// 2. 创建一个带有过期时间的互斥锁
+	mutex := Rs.NewMutex(lockKey, redsync.WithExpiry(expiry))
+	if err := mutex.Lock(); err != nil {
+		log.Printf("LockExtend lock lockKey:%s err: %v\n", lockKey, err)
+		return
+	}
 
-	// 1.开启一个goroutine，周期性地续租锁
+	// 3. 创建带超时的 Context。此 Context 将用于控制任务执行和看门狗协程。
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
+	// 4. 开启一个 goroutine，周期性地续租锁 (看门狗)
+	// 它监听 ctx.Done() 来停止续租。
 	go func() {
-		ticker := time.NewTicker(expiry / 2) // 按照需求调整 每隔过期时间的一半续租一次
+		ticker := time.NewTicker(expiry / 2) // 每隔过期时间的一半续租一次
 		defer ticker.Stop()
 
 		for {
@@ -261,33 +272,106 @@ func LockExtend(lockKey string, expiry time.Duration, task func()) {
 			case <-ticker.C:
 				ok, err := mutex.Extend()
 				if !ok || err != nil {
-					log.Printf("LockExtend extend lock: ok:%v err:%v\n", ok, err)
+					log.Printf("LockExtend extend lock failed, exiting watchdog: ok:%v err:%v\n", ok, err)
+					// 续租失败意味着锁可能已被释放或过期，看门狗必须退出。
 					return
 				}
-			case <-done:
+			case <-ctx.Done():
+				// 接收到取消信号 (任务完成或超时)，看门狗退出
+				log.Printf("LockExtend watchdog received done signal, exiting.")
 				return
 			}
 		}
 	}()
 
-	// 2. 使用defer和recover确保资源清理
+	// 5. 使用 defer 确保资源清理
 	defer func() {
-		// 通知goRoutine停止续租
-		close(done)
-
-		// 释放锁
+		// A. 取消 Context。这会向看门狗协程发送停止信号。
+		cancel()
+		// B. 释放锁
 		if ok, err := mutex.Unlock(); !ok || err != nil {
 			log.Printf("LockExtend unlock failed ok:%v,err:%v\n", ok, err)
 		}
-
-		// panic处理
+		// C. 捕获 panic 并转换为 error
 		if p := recover(); p != nil {
-			log.Printf("LockExtend: task panic: %v", p)
+			log.Printf("LockExtend: task panicked: %v", p)
 		}
 	}()
 
-	// 3. 执行任务
-	task() // 如果task内部发生panic，程序流会立即跳转到上面的defer块
+	// 6. 执行任务
+	task()
+}
+
+// LockExtendGeneric 创建带续租的分布式锁并执行任务并返回任务的返回值泛型函数
+// T 是任务函数返回值的类型参数
+// 适合场景：分布式系统并发时只允许一个进程执行一些耗时操作，无法保证锁在释放前执行完，需要给锁续租，直到程序执行完后释放锁，并停止续租
+// lockKey 锁的key
+// expiry 锁的过期时间
+// task 执行的任务
+// timeouts 超时时间 使用超时时间控制比给锁加个超长时间更优，因为即使程序挂了锁住的时间更短
+func LockExtendGeneric[T any](lockKey string, expiry time.Duration, task func() (T, error), timeouts ...time.Duration) (res T, err error) {
+	// 1. 设置默认值
+	if expiry < 1 {
+		expiry = 10 * time.Second
+	}
+
+	var timeout = time.Minute * 5 // 默认5分钟
+	// 任务超时时间必须大于0
+	if len(timeouts) > 0 {
+		timeout = timeouts[0]
+	}
+
+	// 2. 创建一个带有过期时间的互斥锁
+	mutex := Rs.NewMutex(lockKey, redsync.WithExpiry(expiry))
+	if err = mutex.Lock(); err != nil {
+		log.Printf("LockExtend lock lockKey:%s err: %v\n", lockKey, err)
+		return res, fmt.Errorf("failed to acquire lock: %w", err)
+	}
+
+	// 3. 创建带超时的 Context。此 Context 将用于控制任务执行和看门狗协程。
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
+	// 4. 开启一个 goroutine，周期性地续租锁 (看门狗)
+	// 它监听 ctx.Done() 来停止续租。
+	go func() {
+		ticker := time.NewTicker(expiry / 2) // 每隔过期时间的一半续租一次
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				ok, err := mutex.Extend()
+				if !ok || err != nil {
+					log.Printf("LockExtend extend lock failed, exiting watchdog: ok:%v err:%v\n", ok, err)
+					// 续租失败意味着锁可能已被释放或过期，看门狗必须退出。
+					return
+				}
+			case <-ctx.Done():
+				// 接收到取消信号 (任务完成或超时)，看门狗退出
+				log.Printf("LockExtend watchdog received done signal, exiting.")
+				return
+			}
+		}
+	}()
+
+	// 5. 使用 defer 确保资源清理
+	defer func() {
+		// A. 取消 Context。这会向看门狗协程发送停止信号。
+		cancel()
+		// B. 释放锁
+		if ok, err := mutex.Unlock(); !ok || err != nil {
+			log.Printf("LockExtend unlock failed ok:%v,err:%v\n", ok, err)
+		}
+		// C. 捕获 panic 并转换为 error
+		if p := recover(); p != nil {
+			log.Printf("LockExtend: task panicked: %v", p)
+			err = fmt.Errorf("task panic: %v", p)
+		}
+	}()
+
+	// 6. 执行任务
+	res, err = task()
+	return res, err
 }
 
 // LockAwaitOnce 创建带续租的分布式锁并执行任务，等待执行，一直循环获取锁直到获得成功
