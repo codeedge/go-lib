@@ -278,7 +278,7 @@ func LockExtend(lockKey string, expiry time.Duration, task func(), timeouts ...t
 				}
 			case <-ctx.Done():
 				// 接收到取消信号 (任务完成或超时)，看门狗退出
-				log.Printf("LockExtend watchdog received done signal, exiting.")
+				log.Printf("LockExtend watchdog received done signal, exiting.\n")
 				return
 			}
 		}
@@ -294,7 +294,7 @@ func LockExtend(lockKey string, expiry time.Duration, task func(), timeouts ...t
 		}
 		// C. 捕获 panic 并转换为 error
 		if p := recover(); p != nil {
-			log.Printf("LockExtend: task panicked: %v", p)
+			log.Printf("LockExtend: task panicked: %v\n", p)
 		}
 	}()
 
@@ -348,7 +348,7 @@ func LockExtendGeneric[T any](lockKey string, expiry time.Duration, task func() 
 				}
 			case <-ctx.Done():
 				// 接收到取消信号 (任务完成或超时)，看门狗退出
-				log.Printf("LockExtend watchdog received done signal, exiting.")
+				log.Printf("LockExtend watchdog received done signal, exiting.\n")
 				return
 			}
 		}
@@ -364,7 +364,7 @@ func LockExtendGeneric[T any](lockKey string, expiry time.Duration, task func() 
 		}
 		// C. 捕获 panic 并转换为 error
 		if p := recover(); p != nil {
-			log.Printf("LockExtend: task panicked: %v", p)
+			log.Printf("LockExtend: task panicked: %v\n", p)
 			err = fmt.Errorf("task panic: %v", p)
 		}
 	}()
