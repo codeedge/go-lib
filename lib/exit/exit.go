@@ -2,7 +2,6 @@ package exit
 
 import (
 	"context"
-	"github.com/codeedge/go-lib/lib/gopool"
 	"log"
 	"net/http"
 	"os"
@@ -23,7 +22,7 @@ var (
 // ListenExit 监听退出信号 需要使用select{}等方式阻塞main函数的退出
 func ListenExit(callback func(), delay time.Duration) {
 	StopContext, stop = signal.NotifyContext(context.Background(), syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
-	_ = gopool.Pool().Submit(func() {
+	go func() {
 		<-StopContext.Done()
 		Stopping.Store(true)
 
@@ -50,7 +49,7 @@ func ListenExit(callback func(), delay time.Duration) {
 		log.Printf("程序已退出！")
 
 		os.Exit(0)
-	})
+	}()
 }
 
 func StopExit() {
