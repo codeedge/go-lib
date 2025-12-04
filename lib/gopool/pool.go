@@ -1,7 +1,6 @@
 package gopool
 
 import (
-	"feige-cloud-backend/pkg/logs"
 	"log"
 	"runtime/debug"
 	"sync"
@@ -54,12 +53,12 @@ func CreatePool(sizes ...int) *ants.Pool {
 		MaxBlockingTasks: 0,
 		PreAlloc:         false,
 		PanicHandler: func(e interface{}) {
-			logs.Errorf("panic recovered: %v\n 调用栈: %s", e, debug.Stack())
+			log.Printf("panic recovered: %v\n 调用栈: %s\n", e, debug.Stack())
 		},
 	}
 	p, err := ants.NewPool(size, ants.WithOptions(options))
 	if err != nil {
-		logs.Errorf("New Pool Error: %v", err)
+		log.Printf("New Pool Error: %v", err)
 	}
 	return p
 }
