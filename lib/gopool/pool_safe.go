@@ -12,13 +12,13 @@ import (
 )
 
 var (
-	poolSafe     *ants.Pool
+	_poolSafe    *ants.Pool
 	onePoolSafe  sync.Once
 	poolSafeWG   sync.WaitGroup // 跟踪所有通过Submit提交的任务
 	shuttingDown atomic.Bool    // 优雅关闭状态标志
 )
 
-func PoolSafe(sizes ...int) *ants.Pool {
+func poolSafe(sizes ...int) *ants.Pool {
 	size := maxPoolSize
 	if len(sizes) > 0 {
 		size = sizes[0]
@@ -34,7 +34,7 @@ func PoolSafe(sizes ...int) *ants.Pool {
 			},
 		}
 		var err error
-		poolSafe, err = ants.NewPool(size, ants.WithOptions(options))
+		_poolSafe, err = ants.NewPool(size, ants.WithOptions(options))
 		if err != nil {
 			log.Printf("New Pool Error: %v", err)
 		}
@@ -43,7 +43,7 @@ func PoolSafe(sizes ...int) *ants.Pool {
 		exit.WG.Add(1)
 		go gracefulShutdown()
 	})
-	return poolSafe
+	return _poolSafe
 }
 
 // SubmitSafe 提交任务到协程池（修复版本）
@@ -63,7 +63,7 @@ func SubmitSafe(task func()) error {
 	}
 
 	// 提交到ants池
-	return PoolSafe().Submit(wrappedTask)
+	return poolSafe().Submit(wrappedTask)
 }
 
 // gracefulShutdown 优雅关闭处理
@@ -91,7 +91,7 @@ func gracefulShutdown() {
 	}
 
 	// 步骤5：释放ants池资源
-	PoolSafe().Release()
+	poolSafe().Release()
 	log.Println("协程池已关闭")
 }
 
