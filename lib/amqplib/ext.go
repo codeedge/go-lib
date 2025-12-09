@@ -236,21 +236,11 @@ func (c *Client) ConsumeFromTopic(ctx context.Context, exchangeName, queueName, 
 // prefetchCount: 预取消息数量
 // handler: 消息处理函数
 func (c *Client) ConsumeWorkQueue(ctx context.Context, queueName, consumerTag string, prefetchCount int, handler func(data []byte) error) error {
-	// 封装消息处理逻辑：JSON解析 + Ack/Nack
-	messageHandler := func(d amqp.Delivery) {
-		if err := handler(d.Body); err != nil {
-			log.Printf("Worker handler failed: %v", err)
-			d.Nack(false, true) // Nack, Requeue
-		} else {
-			d.Ack(false) // Ack
-		}
-	}
-
-	// 调用通用的 Consume 方法
+	// 调用通用的 Consume 方法，并传入统一的消息处理封装
 	return c.Consume(ctx, &ConsumeOption{
 		Queue:         queueName,
 		Consumer:      consumerTag,
 		AutoAck:       false,         // 工作队列模式通常需要手动确认
 		PrefetchCount: prefetchCount, // 传入 Qos 参数
-	}, messageHandler)
+	}, unifiedMessageHandler(handler))
 }
