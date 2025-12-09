@@ -69,11 +69,11 @@ func (c *Client) PublishToRoutingKey(ctx context.Context, exchangeName, routingK
 // handler 接收消息体并返回错误
 // 注意：该封装假定为手动确认模式。如果 Consume 调用设置了 AutoAck=true，
 // 则内部的 d.Ack/Nack 会被底层 AMQP 库忽略。
-func unifiedMessageHandler(handler func(data []byte) error) func(d amqp.Delivery) {
+func unifiedMessageHandler(queueName string, handler func(data []byte) error) func(d amqp.Delivery) {
 	return func(d amqp.Delivery) {
 		// 调用业务处理函数
 		if err := handler(d.Body); err != nil {
-			log.Printf("Message handler failed for queue %s: %v", d.RoutingKey, err)
+			log.Printf("Message handler failed for queueName:%s Exchange:%s RoutingKey:%s err:%v\n", queueName, d.Exchange, d.RoutingKey, err.Error())
 			// 业务处理失败，Nack 并 requeue (让消息重回队列，通常用于可重试的瞬时错误)
 			// 需要区分是否重试，防止无限循环
 			// 检查错误是否是永久性的
@@ -81,13 +81,14 @@ func unifiedMessageHandler(handler func(data []byte) error) func(d amqp.Delivery
 			var permErr PermanentError
 			if errors.As(err, &permErr) && permErr.Permanent() {
 				requeue = false // 永久性错误，不重回队列 如果配置了死信队列，会进入死信队列
-				log.Printf("Message treated as permanent failure, sending to DLX.")
+				log.Printf("Message treated as permanent failure, sending to DLX.queueName:%s Exchange:%s RoutingKey:%s\n", queueName, d.Exchange, d.RoutingKey)
 			}
 			// Nack 消息，根据错误类型决定是否 Requeue
 			d.Nack(false, requeue)
 		} else {
 			// 业务处理成功，Ack
 			d.Ack(false)
+			log.Printf("Message treated as successful.queueName:%s Exchange:%s RoutingKey:%s\n", queueName, d.Exchange, d.RoutingKey)
 		}
 	}
 }
@@ -97,11 +98,51 @@ func unifiedMessageHandler(handler func(data []byte) error) func(d amqp.Delivery
 // autoAck: 是否自动确认
 // handler: 消息处理函数，接收反序列化的数据
 func (c *Client) ConsumeFromQueue(ctx context.Context, queueName string, autoAck bool, handler func(data []byte) error) error {
+	// 检查队列名称是否为空
+	if queueName == "" {
+		return fmt.Errorf("queue name cannot be empty")
+	}
+	// 声明队列
+	if err := c.DeclareQueue(&QueueOption{
+		Name:       queueName,
+		Durable:    true,
+		AutoDelete: false,
+	}); err != nil {
+		return fmt.Errorf("declare queue failed: %w", err)
+	}
+
 	// 调用通用的 Consume 方法，并传入统一的消息处理封装
 	return c.Consume(ctx, &ConsumeOption{
 		Queue:   queueName,
 		AutoAck: autoAck,
-	}, unifiedMessageHandler(handler))
+	}, unifiedMessageHandler(queueName, handler))
+}
+
+// ConsumeWorkQueue 工作队列模式消费（带预取控制，简化调用）
+// queueName: 队列名称
+// consumerTag: 消费者标签
+// prefetchCount: 预取消息数量
+// handler: 消息处理函数
+func (c *Client) ConsumeWorkQueue(ctx context.Context, queueName, consumerTag string, prefetchCount int, handler func(data []byte) error) error {
+	// 检查队列名称是否为空
+	if queueName == "" {
+		return fmt.Errorf("queue name cannot be empty")
+	}
+	// 声明队列
+	if err := c.DeclareQueue(&QueueOption{
+		Name:       queueName,
+		Durable:    true,
+		AutoDelete: false,
+	}); err != nil {
+		return fmt.Errorf("declare queue failed: %w", err)
+	}
+	// 调用通用的 Consume 方法，并传入统一的消息处理封装
+	return c.Consume(ctx, &ConsumeOption{
+		Queue:         queueName,
+		Consumer:      consumerTag,
+		AutoAck:       false,         // 工作队列模式通常需要手动确认 因为需要手动确认配合 QoS/PrefetchCount 来确保消息不丢失（可靠性），并实现基于消费者处理能力的公平负载均衡。
+		PrefetchCount: prefetchCount, // 传入 Qos 参数
+	}, unifiedMessageHandler(queueName, handler))
 }
 
 // ConsumeFromFanout 消费Fanout交换机的消息
@@ -226,21 +267,4 @@ func (c *Client) ConsumeFromTopic(ctx context.Context, exchangeName, queueName, 
 
 	// 开始消费
 	return c.ConsumeFromQueue(ctx, queueName, autoAck, handler)
-}
-
-// ==================== 工作队列专用方法 ====================
-
-// ConsumeWorkQueue 工作队列模式消费（带预取控制，简化调用）
-// queueName: 队列名称
-// consumerTag: 消费者标签
-// prefetchCount: 预取消息数量
-// handler: 消息处理函数
-func (c *Client) ConsumeWorkQueue(ctx context.Context, queueName, consumerTag string, prefetchCount int, handler func(data []byte) error) error {
-	// 调用通用的 Consume 方法，并传入统一的消息处理封装
-	return c.Consume(ctx, &ConsumeOption{
-		Queue:         queueName,
-		Consumer:      consumerTag,
-		AutoAck:       false,         // 工作队列模式通常需要手动确认
-		PrefetchCount: prefetchCount, // 传入 Qos 参数
-	}, unifiedMessageHandler(handler))
 }

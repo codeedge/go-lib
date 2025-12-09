@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -34,7 +35,8 @@ type Client struct {
 	queueMu   sync.RWMutex        // 队列声明锁
 	queues    map[string]struct{} // 存储已声明的队列信息 虽然队列声明是幂等的，但为了减少io操作，这里使用一个 map 来存储已声明的队列信息
 	// 消费者注册表，用于自动恢复
-	consumerRegistry sync.Map // Key: queueName+consumerTag, Value: *ConsumerState
+	consumerRegistry sync.Map     // Key: queueName+consumerTag, Value: *ConsumerState
+	Stopping         *atomic.Bool // 停止信号标记
 }
 
 // MQ  全局公共变量
@@ -42,7 +44,7 @@ var (
 	MQ *Client
 )
 
-func Init(cfg Config) (err error) {
+func Init(cfg Config, stopping ...*atomic.Bool) (err error) {
 	if cfg.MaxRetries <= 0 {
 		cfg.MaxRetries = 5
 	}
@@ -68,6 +70,9 @@ func Init(cfg Config) (err error) {
 	client.pubPool = newChannelPool(conn, cfg.PublisherPoolSize)
 
 	go client.monitorConnection()
+	if len(stopping) > 0 {
+		client.setStopping(stopping[0])
+	}
 	MQ = client
 	return nil
 }
@@ -85,7 +90,7 @@ func createConnectionWithRetry(cfg Config) (*amqp.Connection, error) {
 
 		waitTime := time.Duration(math.Pow(2, float64(i))) *
 			time.Duration(cfg.RetryBaseInterval) * time.Second
-		log.Printf("Connection attempt %d failed, retrying in %v: %v", i+1, waitTime, err)
+		log.Printf("Connection attempt %d failed, retrying in %v: %v\n", i+1, waitTime, err)
 		time.Sleep(waitTime)
 	}
 
@@ -108,7 +113,7 @@ func newChannelPool(conn *amqp.Connection, size int) *channelPool {
 	for i := 0; i < size; i++ {
 		ch, err := conn.Channel()
 		if err != nil {
-			log.Printf("Error creating channel: %v", err)
+			log.Printf("Error creating channel: %v\n", err)
 			continue
 		}
 		pool.channels <- ch
@@ -143,6 +148,11 @@ func (p *channelPool) Put(ch *amqp.Channel) {
 	}
 }
 
+// setStopping 配置停止信号标记
+func (c *Client) setStopping(stopping *atomic.Bool) {
+	c.Stopping = stopping
+}
+
 // 监控连接状态
 func (c *Client) monitorConnection() {
 	notifyClose := c.conn.NotifyClose(make(chan *amqp.Error))
@@ -152,7 +162,7 @@ func (c *Client) monitorConnection() {
 		log.Println("Connection closed manual-lock")
 		return
 	case err := <-notifyClose:
-		log.Printf("Connection closed: %v", err)
+		log.Printf("Connection closed: %v\n", err)
 		c.reconnect()
 	}
 }
@@ -171,7 +181,7 @@ func (c *Client) reconnect() {
 
 	newConn, err := createConnectionWithRetry(c.config)
 	if err != nil {
-		log.Printf("Permanent reconnect failure: %v", err)
+		log.Printf("Permanent reconnect failure: %v\n", err)
 		return
 	}
 
@@ -191,7 +201,7 @@ func (c *Client) reconnect() {
 		state := value.(*ConsumerState)
 		// 使用一个新的 goroutine 重新启动消费者，避免阻塞重连逻辑
 		go func() {
-			log.Printf("Attempting to recover consumer: %s", key)
+			log.Printf("Attempting to recover consumer: %s\n", key)
 			// 重新声明队列（因为连接断开，声明可能丢失）
 			// 注意：这里假设所有消费者都需要持久化队列（工作队列模式）
 			c.DeclareQueue(&QueueOption{
@@ -202,7 +212,7 @@ func (c *Client) reconnect() {
 			// 重新调用 Consume。由于 Consume 内部会创建新通道、设置 QoS 并启动新的监听循环，
 			// 且注册表已存在，因此这是安全的。
 			if err := c.Consume(context.Background(), state.Option, state.Handler); err != nil {
-				log.Printf("Failed to recover consumer %s: %v", key, err)
+				log.Printf("Failed to recover consumer %s: %v\n", key, err)
 				// 恢复失败，从注册表中删除 (可选，如果希望永久失败则删除)
 				// c.consumerRegistry.Delete(key)
 			}
@@ -302,7 +312,7 @@ func (c *Client) DeclareQueue(opt *QueueOption) error {
 		return err
 	}
 
-	log.Printf("queue declare %s", queue.Name)
+	log.Printf("queue declare %s\n", queue.Name)
 
 	// 3. 回填队列名 (必须保留，因为 BindQueue 和 Consume 需要实际名字)
 	if opt.Name == "" {
@@ -459,7 +469,7 @@ func (c *Client) Consume(ctx context.Context, opt *ConsumeOption, handler func(a
 			c.consumerRegistry.Delete(key)
 			return fmt.Errorf("set QoS failed: %w", err)
 		}
-		log.Printf("Consumer for queue %s set QoS prefetch=%d", opt.Queue, opt.PrefetchCount)
+		log.Printf("Consumer for queue %s set QoS prefetch=%d\n", opt.Queue, opt.PrefetchCount)
 	}
 
 	deliveries, err := ch.ConsumeWithContext(
@@ -486,6 +496,10 @@ func (c *Client) Consume(ctx context.Context, opt *ConsumeOption, handler func(a
 			}
 		}()
 		for d := range deliveries {
+			if c.Stopping != nil && c.Stopping.Load() {
+				log.Printf("程序退出，消费者停止监听MQ。\n")
+				return
+			}
 			handler(d)
 		}
 		// 当 deliveries channel 关闭时（通常是因为连接断开），关闭通道
