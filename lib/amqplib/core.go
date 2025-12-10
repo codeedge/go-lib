@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	Json = "application/json"
-	Text = "text/plain"
+	Json          = "application/json"
+	Text          = "text/plain"
+	PrefetchCount = 100 // Qos 预取消息数量 100-300之间比较合理
 )
 
 // Config 连接配置
@@ -453,24 +454,27 @@ func (c *Client) Consume(ctx context.Context, opt *ConsumeOption, handler func(a
 		c.consumerRegistry.Delete(key)
 		return err
 	}
+
+	var prefetchCount = PrefetchCount
 	// 2. 根据 PrefetchCount 设置 QoS (QoS只对当前专用通道生效)
 	if opt.PrefetchCount > 0 {
-		err = ch.Qos(
-			// 每次预取一个任务 prefetchCount是每个消费者在预取消息的数量，比如设置为10的话，消费者会一次性获取10条消息，处理完再取下一批。
-			// 这样能提高吞吐量，但可能增加内存使用。如果设置为1，就是每次处理完一条再取下一条，更公平但可能降低效率。0（无限制，即尽可能多预取）。
-			opt.PrefetchCount,
-			// 不限制消息总数 prefetchsize是预取消息的总大小，以字节为单位。比如设置为1024的话，消费者最多预取总大小不超过1KB的消息。通常设置为 0 表示不限制
-			0,
-			// 应用在当前通道 决定 QoS 设置是否作用于当前 Channel 的所有消费者。通常设置为 false
-			false,
-		)
-		if err != nil {
-			ch.Close()
-			c.consumerRegistry.Delete(key)
-			return fmt.Errorf("set QoS failed: %w", err)
-		}
-		log.Printf("Consumer for queue %s set QoS prefetch=%d\n", opt.Queue, opt.PrefetchCount)
+		prefetchCount = opt.PrefetchCount
 	}
+	err = ch.Qos(
+		// 每次预取一个任务 prefetchCount是每个消费者在预取消息的数量，比如设置为10的话，消费者会一次性获取10条消息，处理完再取下一批。
+		// 这样能提高吞吐量，但可能增加内存使用。如果设置为1，就是每次处理完一条再取下一条，更公平但可能降低效率。0（无限制，即尽可能多预取）。
+		prefetchCount,
+		// 不限制消息总数 prefetchsize是预取消息的总大小，以字节为单位。比如设置为1024的话，消费者最多预取总大小不超过1KB的消息。通常设置为 0 表示不限制
+		0,
+		// 应用在当前通道 决定 QoS 设置是否作用于当前 Channel 的所有消费者。通常设置为 false
+		false,
+	)
+	if err != nil {
+		ch.Close()
+		c.consumerRegistry.Delete(key)
+		return fmt.Errorf("set QoS failed: %w", err)
+	}
+	log.Printf("Consumer for queue %s set QoS prefetch=%d\n", opt.Queue, opt.PrefetchCount)
 
 	deliveries, err := ch.ConsumeWithContext(
 		ctx,
