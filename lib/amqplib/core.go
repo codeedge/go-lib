@@ -36,7 +36,7 @@ type Client struct {
 	queues    map[string]struct{} // 存储已声明的队列信息 虽然队列声明是幂等的，但为了减少io操作，这里使用一个 map 来存储已声明的队列信息
 	// 消费者注册表，用于自动恢复
 	consumerRegistry sync.Map     // Key: queueName+consumerTag, Value: *ConsumerState
-	Stopping         *atomic.Bool // 停止信号标记
+	stopping         *atomic.Bool // 停止信号标记
 }
 
 // MQ  全局公共变量
@@ -150,7 +150,7 @@ func (p *channelPool) Put(ch *amqp.Channel) {
 
 // setStopping 配置停止信号标记
 func (c *Client) setStopping(stopping *atomic.Bool) {
-	c.Stopping = stopping
+	c.stopping = stopping
 }
 
 // 监控连接状态
@@ -496,7 +496,7 @@ func (c *Client) Consume(ctx context.Context, opt *ConsumeOption, handler func(a
 			}
 		}()
 		for d := range deliveries {
-			if c.Stopping != nil && c.Stopping.Load() {
+			if c.stopping != nil && c.stopping.Load() {
 				log.Printf("程序退出，消费者停止监听MQ。\n")
 				return
 			}
