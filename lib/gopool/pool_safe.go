@@ -40,7 +40,7 @@ func poolSafe(sizes ...int) *ants.Pool {
 		}
 
 		// 注册全局优雅退出处理
-		exit.WG.Add(1)
+		exit.Instance.WG.Add(1)
 		go gracefulShutdown()
 	})
 	return _poolSafe
@@ -68,8 +68,8 @@ func SubmitSafe(task func()) error {
 
 // gracefulShutdown 优雅关闭处理
 func gracefulShutdown() {
-	defer exit.WG.Done()      // 步骤1：通知全局组，本协调员任务已结束
-	<-exit.StopContext.Done() // 阻塞，直到收到停止信号
+	defer exit.Instance.WG.Done()      // 步骤1：通知全局组，本协调员任务已结束
+	<-exit.Instance.StopContext.Done() // 阻塞，直到收到停止信号
 
 	log.Println("协程池开始优雅关闭...")
 

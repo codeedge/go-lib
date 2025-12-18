@@ -3,6 +3,7 @@ package rabbitmq
 import (
 	"context"
 	"fmt"
+	"github.com/codeedge/go-lib/lib/exit"
 	"log"
 	"math"
 	"sync"
@@ -36,8 +37,10 @@ type Client struct {
 	queueMu   sync.RWMutex        // 队列声明锁
 	queues    map[string]struct{} // 存储已声明的队列信息 虽然队列声明是幂等的，但为了减少io操作，这里使用一个 map 来存储已声明的队列信息
 	// 消费者注册表，用于自动恢复
-	consumerRegistry sync.Map     // Key: queueName+consumerTag, Value: *ConsumerState
-	stopping         *atomic.Bool // 停止信号标记
+	consumerRegistry sync.Map       // Key: queueName+consumerTag, Value: *ConsumerState
+	safeExit         *exit.SafeExit // 优雅退出
+	consumeWG        sync.WaitGroup // 跟踪所有通过消费的任务
+	shuttingDown     atomic.Bool    // 优雅关闭状态标志
 }
 
 // MQ  全局公共变量
@@ -45,7 +48,7 @@ var (
 	MQ *Client
 )
 
-func Init(cfg Config, stopping ...*atomic.Bool) (err error) {
+func Init(cfg Config, safeExit *exit.SafeExit) (err error) {
 	if cfg.MaxRetries <= 0 {
 		cfg.MaxRetries = 5
 	}
@@ -66,16 +69,45 @@ func Init(cfg Config, stopping ...*atomic.Bool) (err error) {
 		config:    cfg,
 		closeChan: make(chan struct{}),
 		queues:    make(map[string]struct{}),
+		safeExit:  safeExit,
 	}
 
 	client.pubPool = newChannelPool(conn, cfg.PublisherPoolSize)
 
 	go client.monitorConnection()
-	if len(stopping) > 0 {
-		client.setStopping(stopping[0])
-	}
 	MQ = client
+	// 注册全局优雅退出处理
+	client.safeExit.WG.Add(1)
+	go client.gracefulShutdown()
 	return nil
+}
+
+// gracefulShutdown 优雅关闭处理
+func (c *Client) gracefulShutdown() {
+	defer c.safeExit.WG.Done()      // 步骤1：通知全局组，本协调员任务已结束
+	<-c.safeExit.StopContext.Done() // 阻塞，直到收到停止信号
+
+	log.Println("MQ 接收到退出信号，正在停止新消息流入...")
+
+	c.shuttingDown.Store(true) // 步骤2：阻止新任务提交
+
+	// 步骤3：等待所有已提交任务完成 (依赖内部组 poolSafeWG)
+	done := make(chan struct{})
+	go func() {
+		c.consumeWG.Wait()
+		close(done)
+	}()
+
+	// 步骤4：带超时等待
+	select {
+	case <-done:
+		log.Println("所有mq消费任务已完成")
+	case <-time.After(30 * time.Second):
+		log.Println("mq消费任务等待超时，强制退出")
+	}
+	// 最后再关闭连接
+	c.Close()
+	log.Println("mq消费者已关闭")
 }
 
 // 创建带重试的连接
@@ -149,11 +181,6 @@ func (p *channelPool) Put(ch *amqp.Channel) {
 	}
 }
 
-// setStopping 配置停止信号标记
-func (c *Client) setStopping(stopping *atomic.Bool) {
-	c.stopping = stopping
-}
-
 // 监控连接状态
 func (c *Client) monitorConnection() {
 	notifyClose := c.conn.NotifyClose(make(chan *amqp.Error))
@@ -170,6 +197,11 @@ func (c *Client) monitorConnection() {
 
 // 重连处理
 func (c *Client) reconnect() {
+	// 如果正在关闭，直接退出，不要再重连
+	if c.shuttingDown.Load() {
+		log.Println("Detected client is closing, skipping reconnect.")
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -385,12 +417,19 @@ func (c *Client) Publish(ctx context.Context, opt *PublishOption, body []byte) (
 	}
 	defer c.pubPool.Put(ch)
 
+	// 开启 Confirm 模式 (如果是高频发送，建议在创建通道时就开启)
+	if err := ch.Confirm(false); err != nil {
+		return fmt.Errorf("failed to put channel in confirm mode: %w", err)
+	}
+	// 监听确认回执
+	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+
 	deliveryMode := amqp.Transient
 	if opt.Persistent {
 		deliveryMode = amqp.Persistent
 	}
 
-	return ch.PublishWithContext(
+	err = ch.PublishWithContext(
 		ctx,
 		opt.Exchange,
 		opt.RoutingKey,
@@ -402,6 +441,22 @@ func (c *Client) Publish(ctx context.Context, opt *PublishOption, body []byte) (
 			DeliveryMode: deliveryMode,
 		},
 	)
+	if err != nil {
+		return err
+	}
+	// 等待确认
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case confirm, ok := <-confirms:
+		if !ok {
+			return fmt.Errorf("confirm channel closed")
+		}
+		if confirm.Ack {
+			return nil // 消息确认到达 Broker
+		}
+		return fmt.Errorf("message nack-ed by broker")
+	}
 }
 
 // ConsumerState 存储消费者重建所需的所有信息
@@ -476,8 +531,12 @@ func (c *Client) Consume(ctx context.Context, opt *ConsumeOption, handler func(a
 	}
 	log.Printf("Consumer for queue %s set QoS prefetch=%d\n", opt.Queue, opt.PrefetchCount)
 
+	// 创建一个派生自全局 StopContext 的上下文，或者直接使用 StopContext
+	// 这样当 exit.StopContext 取消时，RabbitMQ 的消费监听会自动停止
+	consumerCtx, cancel := context.WithCancel(c.safeExit.StopContext)
+
 	deliveries, err := ch.ConsumeWithContext(
-		ctx,
+		consumerCtx,
 		opt.Queue,
 		opt.Consumer,
 		opt.AutoAck,
@@ -487,29 +546,59 @@ func (c *Client) Consume(ctx context.Context, opt *ConsumeOption, handler func(a
 		opt.Args,
 	)
 	if err != nil {
+		cancel()
 		// 如果消费启动失败，关闭创建的通道
 		ch.Close()
 		c.consumerRegistry.Delete(key)
 		return err
 	}
 
+	// 创建一个局部的 WG 跟踪此通道发出的任务 定义在每个 Consume 调用内部，用来保护 ch (Channel) 不被提前关闭，确保 Ack 能发出去。 和每个消费者绑定，consumeWG是全局控制所有消费者的，不适合用在这里
+	// 由于消息处理是异步的，在 range deliveries 结束后立即执行了 defer ch.Close()。
+	// 如果此时异步的处理协程还没执行完 handler(msg)（包含里面的 Ack），通道（Channel）就已经被关闭了，后续的 msg.Ack() 将会报错：channel already closed
+	var localWG sync.WaitGroup
+
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Println("Consumer panic:", r)
 			}
+			// 等待本通道发出的所有异步任务处理完
+			localWG.Wait()
+			cancel() // 确保退出时释放资源
+			// 当 deliveries channel 关闭时（通常是因为连接断开），关闭通道
+			ch.Close()
+			log.Println("Delivery channel closed, Dedicated channel closing....")
+			// ** 不从注册表删除 **：通道关闭通常意味着连接断开，此时需要等待 reconnect 逻辑来重建该消费者
 		}()
 		for d := range deliveries {
-			if c.stopping != nil && c.stopping.Load() {
-				log.Printf("程序退出，消费者停止监听MQ。\n")
-				return
+			// 风险： 假设此时 StopContext 已经触发，deliveries 刚读取出最后一条消息，循环结束。在执行 consumeWG.Add(1) 之前，主协程的 consumeWG.Wait() 可能已经因为之前的任务刚好清零而穿透了。
+			// 改进方案
+			// 在派生处理协程之前，先检查上下文状态，并确保 Add 操作在循环内是安全的。
+			// 检查是否已经关闭，避免在关闭瞬间还在开新协程
+			select {
+			case <-consumerCtx.Done():
+				// 如果已取消，拒绝处理这条消息（让它由 MQ 重新投递或丢弃）
+				d.Nack(false, true)
+				continue
+			default:
 			}
-			handler(d)
+			// 此时不需要在这里判断 shuttingDown.Load()
+			// 因为 Context 取消后，deliveries 通道会被 RabbitMQ 驱动关闭
+			// if shuttingDown.Load() {
+			// 	log.Printf("程序退出，消费者停止监听MQ。\n")
+			// 	return
+			// }
+			// 增加等待组计数
+			c.consumeWG.Add(1)
+			localWG.Add(1) // 局部计数
+			// 包装任务函数，确保资源清理
+			go func(msg amqp.Delivery) { // 建议开启协程处理，不阻塞监听
+				defer c.consumeWG.Done()
+				defer localWG.Done() // 处理完任务减少局部计数
+				handler(msg)
+			}(d)
 		}
-		// 当 deliveries channel 关闭时（通常是因为连接断开），关闭通道
-		log.Println("Delivery channel closed, Dedicated channel closing....")
-		ch.Close()
-		// ** 不从注册表删除 **：通道关闭通常意味着连接断开，此时需要等待 reconnect 逻辑来重建该消费者
 	}()
 
 	return nil

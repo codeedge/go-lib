@@ -3,6 +3,7 @@ package rabbitmq
 import (
 	"context"
 	"fmt"
+	"github.com/codeedge/go-lib/lib/exit"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
 	"testing"
@@ -18,7 +19,7 @@ func Test1(t *testing.T) {
 		PublisherPoolSize: 3,
 	}
 
-	err := Init(cfg)
+	err := Init(cfg, exit.Instance)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -60,7 +61,7 @@ func Test2(t *testing.T) {
 		PublisherPoolSize: 1,
 	}
 
-	err := Init(cfg)
+	err := Init(cfg, exit.Instance)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -107,7 +108,7 @@ func TestReConnect(t *testing.T) {
 		PublisherPoolSize: 1000,
 	}
 
-	err := Init(cfg)
+	err := Init(cfg, exit.Instance)
 	if err != nil {
 		log.Fatal(err)
 	}

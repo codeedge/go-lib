@@ -12,19 +12,22 @@ import (
 	"time"
 )
 
-var (
+type SafeExit struct {
 	StopContext context.Context
 	stop        context.CancelFunc
 	Stopping    atomic.Bool
 	WG          sync.WaitGroup // 跟踪所有 safeExit 协程
-)
+}
+
+var Instance *SafeExit
 
 // ListenExit 监听退出信号 需要使用select{}等方式阻塞main函数的退出
 func ListenExit(callback func(), delay time.Duration) {
-	StopContext, stop = signal.NotifyContext(context.Background(), syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
+	Instance = &SafeExit{}
+	Instance.StopContext, Instance.stop = signal.NotifyContext(context.Background(), syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		<-StopContext.Done()
-		Stopping.Store(true)
+		<-Instance.StopContext.Done()
+		Instance.Stopping.Store(true)
 
 		// 第一步：关闭HTTP服务器（停止接收新请求）
 		if httpServer != nil {
@@ -43,7 +46,7 @@ func ListenExit(callback func(), delay time.Duration) {
 		}
 
 		// 第三步：等待剩余任务
-		WG.Wait() // 等待所有 safeExit 协程完成
+		Instance.WG.Wait() // 等待所有 safeExit 协程完成
 		time.Sleep(delay)
 
 		log.Printf("程序已退出！")
@@ -53,7 +56,7 @@ func ListenExit(callback func(), delay time.Duration) {
 }
 
 func StopExit() {
-	stop()
+	Instance.stop()
 }
 
 var (
