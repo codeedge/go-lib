@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/codeedge/go-lib/lib/exit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"os"
@@ -24,7 +25,7 @@ var TestConfig = Config{
 // Global setup: 在所有测试运行前初始化客户端
 func TestMain(m *testing.M) {
 	// 1. 初始化 RabbitMQ 客户端
-	err := Init(TestConfig)
+	err := Init(TestConfig, exit.Instance)
 	if err != nil {
 		fmt.Printf("FATAL: Failed to initialize RabbitMQ client. Is RabbitMQ running? Error: %v\n", err)
 		os.Exit(1)
@@ -331,4 +332,20 @@ func TestConsumeWorkQueue_Qos(t *testing.T) {
 
 	assert.Equal(t, 2, counts["Consumer1"], "Consumer 1 did not receive 2 tasks (QoS test)")
 	assert.Equal(t, 2, counts["Consumer2"], "Consumer 2 did not receive 2 tasks (QoS test)")
+}
+
+func TestDLX(t *testing.T) {
+	ctx := context.Background()
+	orderData := []byte("OrderID: 123456")
+	// 1 用户下单时 (发送 10 分钟延迟)：
+	// 延迟 600,000 毫秒 (10分钟)
+	MQ.PublishDelay(ctx, "order.cancel", orderData, 600000)
+
+	// 2 后台取消服务 (启动监听)：
+	MQ.ConsumeDelay(ctx, "order.cancel", func(data []byte) error {
+		// 1. 解析订单ID
+		// 2. 查数据库：如果还是待支付，则执行取消
+		// 3. 返回 nil (Ack)
+		return nil
+	})
 }
