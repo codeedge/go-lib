@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/codeedge/go-lib/lib/exit"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"os"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/codeedge/go-lib/lib/exit"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestConfig 用于测试的配置
@@ -120,7 +121,7 @@ func TestPublishToRoutingKey(t *testing.T) {
 	require.NoError(t, err, "Setup DeclareExchange failed")
 
 	// 执行发布
-	err = MQ.PublishToRoutingKey(context.Background(), exchangeName, routingKey, data)
+	err = MQ.PublishToDirect(context.Background(), exchangeName, routingKey, data)
 	assert.NoError(t, err, "PublishToRoutingKey failed")
 }
 
@@ -336,7 +337,7 @@ func TestConsumeWorkQueue_Qos(t *testing.T) {
 
 func TestDLX(t *testing.T) {
 	ctx := context.Background()
-	orderData := []byte("OrderID: 123456")
+	orderData := []byte("OrderID:123456")
 	// 1 用户下单时 (发送 10 分钟延迟)：
 	// 延迟 600,000 毫秒 (10分钟)
 	MQ.PublishDelay(ctx, "order.cancel", orderData, 600000)
@@ -346,6 +347,28 @@ func TestDLX(t *testing.T) {
 		// 1. 解析订单ID
 		// 2. 查数据库：如果还是待支付，则执行取消
 		// 3. 返回 nil (Ack)
+		return nil
+	})
+}
+
+func TestHash(t *testing.T) {
+	ctx := context.Background()
+	smsRecord := []byte("Id:123456")
+	// 生产者代码示例：
+	// 每次发消息，都把 ID 传进去
+	smsID := "123456789"
+	MQ.PublishToHashExchange(ctx, "sms_hash_ex", smsID, smsRecord)
+
+	// 消费者代码示例：
+	// 为了保证批处理不乱序，建议每个节点对应一个独立的队列（例如队列名加节点序号）。如果多个节点共用一个队列，RabbitMQ 默认的循环分发（Round-Robin）依然可能导致消息在进入 smsCache 之前就被分给了不同节点。
+	// 推荐做法：
+	// 节点 1
+	MQ.ConsumeFromHashExchange(ctx, "sms_hash_ex", "sms_q_1", "10", func(data []byte) error {
+		return nil
+	})
+
+	// 节点 2
+	MQ.ConsumeFromHashExchange(ctx, "sms_hash_ex", "sms_q_2", "10", func(data []byte) error {
 		return nil
 	})
 }

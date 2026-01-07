@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
 	"time"
+
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // ==================== 简化的发布方法 ====================
@@ -33,6 +34,14 @@ func (c *Client) PublishToQueue(ctx context.Context, queueName string, data any)
 // exchangeName: 交换机名称
 // data: JSON可序列化的数据
 func (c *Client) PublishToFanout(ctx context.Context, exchangeName string, data any) error {
+	// 显式声明交换机，确保不会因为交换机不存在而丢消息
+	if err := c.DeclareExchange(ExchangeOption{
+		Name:    exchangeName,
+		Kind:    "fanout",
+		Durable: true,
+	}); err != nil {
+		return fmt.Errorf("declare exchange failed: %w", err)
+	}
 	body, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("json marshal failed: %w", err)
@@ -46,11 +55,19 @@ func (c *Client) PublishToFanout(ctx context.Context, exchangeName string, data 
 	}, body)
 }
 
-// PublishToRoutingKey 发布消息到Direct交换机（路由模式）/Topic交换机（主题模式）
+// PublishToDirect 发布消息到Direct交换机（路由模式）
 // exchangeName: 交换机名称
 // routingKey: 路由键（Direct交换机精确匹配/Direct交换机支持通配符）
 // data: JSON可序列化的数据
-func (c *Client) PublishToRoutingKey(ctx context.Context, exchangeName, routingKey string, data any) error {
+func (c *Client) PublishToDirect(ctx context.Context, exchangeName, routingKey string, data any) error {
+	// 显式声明交换机。这里默认使用 direct，如果是 Topic 模式，MQ 也能兼容发送
+	if err := c.DeclareExchange(ExchangeOption{
+		Name:    exchangeName,
+		Kind:    "direct",
+		Durable: true,
+	}); err != nil {
+		return fmt.Errorf("declare exchange failed: %w", err)
+	}
 	body, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("json marshal failed: %w", err)
@@ -59,6 +76,65 @@ func (c *Client) PublishToRoutingKey(ctx context.Context, exchangeName, routingK
 	return c.Publish(ctx, &PublishOption{
 		Exchange:    exchangeName,
 		RoutingKey:  routingKey,
+		ContentType: Json,
+		Persistent:  true,
+	}, body)
+}
+
+// PublishToTopic 发布消息到 Topic 交换机（主题模式）
+// exchangeName: 交换机名称
+// routingKey: 路由键（Direct交换机精确匹配/Direct交换机支持通配符）
+// data: JSON可序列化的数据
+func (c *Client) PublishToTopic(ctx context.Context, exchangeName, routingKey string, data any) error {
+	// 显式指定为 topic 类型
+	if err := c.DeclareExchange(ExchangeOption{
+		Name:    exchangeName,
+		Kind:    "topic",
+		Durable: true,
+	}); err != nil {
+		return fmt.Errorf("declare topic exchange failed: %w", err)
+	}
+
+	body, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("json marshal failed: %w", err)
+	}
+
+	return c.Publish(ctx, &PublishOption{
+		Exchange:    exchangeName,
+		RoutingKey:  routingKey,
+		ContentType: Json,
+		Persistent:  true,
+	}, body)
+}
+
+// PublishToHashExchange 发布消息到一致性哈希交换机
+// RabbitMQ 插件本质上是内置在安装包里的，只是默认没有激活。启用插件：确保服务器执行了 rabbitmq-plugins enable rabbitmq_consistent_hash_exchange。
+// exchangeName: 交换机名称
+// hashKey: 哈希键（这里传入唯一 ID 的字符串，插件会对其进行哈希计算）
+// data: 业务数据
+// 针对 rabbitmq-consistent-hash-exchange 插件，由于它是一种特殊的交换机类型（x-consistent-hash），封装代码只需要在 ExchangeOption 的参数上进行微调。
+func (c *Client) PublishToHashExchange(ctx context.Context, exchangeName, hashKey string, data any) error {
+	// 1. 声明哈希交换机
+	err := c.DeclareExchange(ExchangeOption{
+		Name:    exchangeName,
+		Kind:    "x-consistent-hash", // 插件提供的固定类型
+		Durable: true,
+	})
+	if err != nil {
+		return fmt.Errorf("declare hash exchange failed: %w", err)
+	}
+
+	body, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	// 2. 发布消息
+	// 注意：这里的 RoutingKey 就是 hashKey，插件会根据它决定去哪个队列
+	return c.Publish(ctx, &PublishOption{
+		Exchange:    exchangeName,
+		RoutingKey:  hashKey,
 		ContentType: Json,
 		Persistent:  true,
 	}, body)
@@ -371,7 +447,7 @@ func (c *Client) ConsumeDelay(ctx context.Context, targetQueue string, handler f
 
 // ==================== 延迟消息 (插件模式: rabbitmq-delayed-message-exchange) ====================
 // 优点：解决队头阻塞，支持单个消息设置不同延迟时间，更灵活。
-// 缺点：需要 RabbitMQ 服务器安装插件。
+// 缺点：需要 RabbitMQ 服务器安装插件。它是一个社区插件。RabbitMQ 的官方安装包里不包含它。你需要手动去 GitHub 下载对应的 .ez 文件，放到 RabbitMQ 的插件目录，才能执行 enable。 启用命令：rabbitmq-plugins enable rabbitmq_delayed_message_exchange
 
 // PublishDelayPlugin 使用插件发送延迟消息
 func (c *Client) PublishDelayPlugin(ctx context.Context, exchangeName, routingKey string, data any, delay time.Duration) error {
@@ -437,4 +513,38 @@ func (c *Client) ConsumeDelayPlugin(ctx context.Context, exchangeName, queueName
 	c.BindQueue(queueName, routingKey, exchangeName)
 
 	return c.ConsumeWorkQueue(ctx, queueName, "plugin-delay-worker", PrefetchCount, handler)
+}
+
+// ConsumeFromHashExchange 从一致性哈希交换机消费
+// RabbitMQ 插件本质上是内置在安装包里的，只是默认没有激活。启用插件：确保服务器执行了 rabbitmq-plugins enable rabbitmq_consistent_hash_exchange。
+// exchangeName: 交换机名称
+// queueName: 队列名称（分布式下，每个节点可以监听同一个队列名实现负载均衡，或者每个节点独立队列）
+// weight: 权重，通常传 "10"，字符串形式 在一致性哈希交换机中，RoutingKey 不再是匹配字符，而是权重（Weight）。权重通常建议设为 "10"、"20" 等字符串。
+// handler: 业务处理函数
+func (c *Client) ConsumeFromHashExchange(ctx context.Context, exchangeName, queueName, weight string, handler func(data []byte) error) error {
+	// 1. 声明哈希交换机
+	if err := c.DeclareExchange(ExchangeOption{
+		Name:    exchangeName,
+		Kind:    "x-consistent-hash",
+		Durable: true,
+	}); err != nil {
+		return err
+	}
+
+	// 2. 声明队列 (持久化)
+	if err := c.DeclareQueue(&QueueOption{
+		Name:    queueName,
+		Durable: true,
+	}); err != nil {
+		return err
+	}
+
+	// 3. 绑定队列
+	// 注意：在一致性哈希中，key 必须是权重的数字字符串（如 "10"）
+	if err := c.BindQueue(queueName, weight, exchangeName); err != nil {
+		return err
+	}
+
+	// 4. 调用你封装好的工作队列模式开始消费
+	return c.ConsumeWorkQueue(ctx, queueName, "hash-worker", PrefetchCount, handler)
 }
