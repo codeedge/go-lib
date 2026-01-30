@@ -49,6 +49,9 @@ func ListenExit(callback func(), delay time.Duration) {
 		Instance.WG.Wait() // 等待所有 safeExit 协程完成
 		time.Sleep(delay)
 
+		// 打印当前CPU和内存占用情况
+		PrintResourceUsage()
+
 		log.Printf("程序已退出！")
 
 		os.Exit(0)

@@ -3,12 +3,13 @@ package rabbitmq
 import (
 	"context"
 	"fmt"
-	"github.com/codeedge/go-lib/lib/exit"
 	"log"
 	"math"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/codeedge/go-lib/lib/exit"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
