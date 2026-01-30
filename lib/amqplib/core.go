@@ -115,9 +115,11 @@ func createConnectionWithRetry(cfg Config) (*amqp.Connection, error) {
 	var conn *amqp.Connection
 	var err error
 
+	// 第一阶段：指数退避重试
 	for i := 0; i < cfg.MaxRetries; i++ {
 		conn, err = amqp.Dial(cfg.URL)
 		if err == nil {
+			log.Printf("Connection established after %d total attempts\n", i+1)
 			return conn, nil
 		}
 
@@ -127,7 +129,21 @@ func createConnectionWithRetry(cfg Config) (*amqp.Connection, error) {
 		time.Sleep(waitTime)
 	}
 
-	return nil, fmt.Errorf("failed to connect after %d attempts: %w", cfg.MaxRetries, err)
+	// 第二阶段：超过重试次数后，每分钟重试一次，直到成功
+	retryCount := cfg.MaxRetries
+	for {
+		conn, err = amqp.Dial(cfg.URL)
+		if err == nil {
+			log.Printf("Connection established after %d total attempts\n", retryCount+1)
+			return conn, nil
+		}
+
+		retryCount++
+		log.Printf("Connection attempt %d failed, retrying in 1 minute: %v\n", retryCount, err)
+		time.Sleep(1 * time.Minute)
+	}
+
+	// return nil, fmt.Errorf("failed to connect after %d attempts: %w", cfg.MaxRetries, err)
 }
 
 // channelPool 通道池实现，用于复用 AMQP 通道
