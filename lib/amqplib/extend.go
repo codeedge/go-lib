@@ -118,9 +118,10 @@ func (c *Client) PublishToTopic(ctx context.Context, exchangeName, routingKey st
 // 则内部的 d.Ack/Nack 会被底层 AMQP 库忽略。
 func unifiedMessageHandler(queueName string, handler func(data []byte) error) func(d amqp.Delivery) {
 	return func(d amqp.Delivery) {
+		body := d.Body
 		// 调用业务处理函数
-		if err := handler(d.Body); err != nil {
-			log.Printf("Message handler failed for queueName:%s Exchange:%s RoutingKey:%s err:%v\n", queueName, d.Exchange, d.RoutingKey, err.Error())
+		if err := handler(body); err != nil {
+			log.Printf("Message handler failed for queueName:%s Exchange:%s RoutingKey:%s body:%s err:%v\n", queueName, d.Exchange, d.RoutingKey, string(body), err)
 			// 业务处理失败，Nack 并 requeue (让消息重回队列，通常用于可重试的瞬时错误)
 			// 需要区分是否重试，防止无限循环
 			// 检查错误是否是永久性的
@@ -128,14 +129,14 @@ func unifiedMessageHandler(queueName string, handler func(data []byte) error) fu
 			var permErr PermanentError
 			if errors.As(err, &permErr) && permErr.Permanent() {
 				requeue = false // 永久性错误，不重回队列 如果配置了死信队列，会进入死信队列
-				log.Printf("Message treated as permanent failure, sending to DLX.queueName:%s Exchange:%s RoutingKey:%s\n", queueName, d.Exchange, d.RoutingKey)
+				log.Printf("Message treated as permanent failure, sending to DLX.queueName:%s Exchange:%s RoutingKey:%s body:%s\n", queueName, d.Exchange, d.RoutingKey, string(body))
 			}
 			// Nack 消息，根据错误类型决定是否 Requeue
 			d.Nack(false, requeue)
 		} else {
 			// 业务处理成功，Ack
 			d.Ack(false)
-			log.Printf("Message treated as successful.queueName:%s Exchange:%s RoutingKey:%s\n", queueName, d.Exchange, d.RoutingKey)
+			log.Printf("Message treated as successful.queueName:%s Exchange:%s RoutingKey:%s body:%s\n", queueName, d.Exchange, d.RoutingKey, string(body))
 		}
 	}
 }

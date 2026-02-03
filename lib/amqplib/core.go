@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/codeedge/go-lib/lib/exit"
-
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -413,6 +412,7 @@ type PublishOption struct {
 }
 
 func (c *Client) Publish(ctx context.Context, opt *PublishOption, body []byte) (err error) {
+	log.Printf("Publish info for Exchange:%s RoutingKey:%s body:%s\n", opt.Exchange, opt.RoutingKey, string(body))
 	if opt.RoutingKey == "" && opt.Exchange == "" {
 		return fmt.Errorf("路由键和交换机名称不能同时为空")
 	}
@@ -421,6 +421,7 @@ func (c *Client) Publish(ctx context.Context, opt *PublishOption, body []byte) (
 		// 声明队列
 		err = c.DeclareQueue(&QueueOption{Name: opt.RoutingKey, Durable: true})
 		if err != nil {
+			log.Printf("Publish failed for Exchange:%s RoutingKey:%s body:%s err:%v\n", opt.Exchange, opt.RoutingKey, string(body), err)
 			return err
 		}
 	}
@@ -430,12 +431,14 @@ func (c *Client) Publish(ctx context.Context, opt *PublishOption, body []byte) (
 	// 2.无状态性：发布操作不需要设置 Qos 等会污染通道状态的配置，池中的通道可以安全地被复用。
 	ch, err := c.pubPool.Get()
 	if err != nil {
+		log.Printf("Publish failed for Exchange:%s RoutingKey:%s body:%s err:%v\n", opt.Exchange, opt.RoutingKey, string(body), err)
 		return err
 	}
 	defer c.pubPool.Put(ch)
 
 	// 开启 Confirm 模式 (如果是高频发送，建议在创建通道时就开启)
-	if err := ch.Confirm(false); err != nil {
+	if err = ch.Confirm(false); err != nil {
+		log.Printf("Publish failed for Exchange:%s RoutingKey:%s body:%s err:%v\n", opt.Exchange, opt.RoutingKey, string(body), err)
 		return fmt.Errorf("failed to put channel in confirm mode: %w", err)
 	}
 	// 监听确认回执
@@ -459,6 +462,7 @@ func (c *Client) Publish(ctx context.Context, opt *PublishOption, body []byte) (
 		},
 	)
 	if err != nil {
+		log.Printf("Publish failed for Exchange:%s RoutingKey:%s body:%s err:%v\n", opt.Exchange, opt.RoutingKey, string(body), err)
 		return err
 	}
 	// 等待确认
