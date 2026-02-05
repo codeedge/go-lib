@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,6 +44,9 @@ type Client struct {
 	safeExit         *exit.SafeExit // 优雅退出
 	consumeWG        sync.WaitGroup // 跟踪所有通过消费的任务
 	shuttingDown     atomic.Bool    // 优雅关闭状态标志
+	// --- 新增：重连控制 ---
+	isConnecting  int32      // 0: 正常, 1: 正在重连
+	reconnectCond *sync.Cond // 用于阻塞和唤醒请求
 }
 
 // MQ  全局公共变量
@@ -73,8 +77,13 @@ func Init(cfg Config, safeExit *exit.SafeExit) (err error) {
 		queues:    make(map[string]struct{}),
 		safeExit:  safeExit,
 	}
+	// 初始化信号灯
+	// 修改：Cond 绑定已有的读写锁（mu 是 RWMutex，底层包含 Mutex）
+	// 注意：Cond 需要 Locker 接口，mu.RLocker() 或 mu 都可以，这里推荐绑定 mu
+	client.reconnectCond = sync.NewCond(&client.mu)
 
 	client.pubPool = newChannelPool(conn, cfg.PublisherPoolSize)
+	notifyBlocked(conn)
 
 	go client.monitorConnection()
 	MQ = client
@@ -118,8 +127,20 @@ func createConnectionWithRetry(cfg Config) (*amqp.Connection, error) {
 	var err error
 	// 核心修改：使用 DialConfig 替代 Dial，并设置心跳
 	amqpCfg := amqp.Config{
-		Heartbeat: 10 * time.Second,                   // 10秒心跳，检测半开连接
-		Dial:      amqp.DefaultDial(time.Second * 10), // 建立连接的超时时间
+		Heartbeat: 30 * time.Second, // 30秒心跳，检测半开连接
+		// Dial:      amqp.DefaultDial(time.Second * 10), // 建立连接的超时时间
+		Dial: func(network, addr string) (net.Conn, error) {
+			conn, err := net.DialTimeout(network, addr, 10*time.Second)
+			if err != nil {
+				return nil, err
+			}
+			// 关键：设置 TCP 层面的 KeepAlive，配合 AMQP 心跳双重保险
+			if tc, ok := conn.(*net.TCPConn); ok {
+				tc.SetKeepAlive(true)
+				tc.SetKeepAlivePeriod(30 * time.Second)
+			}
+			return conn, nil
+		},
 	}
 
 	conn, err = amqp.DialConfig(cfg.URL, amqpCfg)
@@ -184,6 +205,50 @@ func newChannelPool(conn *amqp.Connection, size int) *channelPool {
 	return pool
 }
 
+/*
+mq报错了，加上Block监控。夜里22点发生了报错，mq通道创建失败发生在早上9点多，可能是早上流量上来了，需要创建新的通道才暴露出问题
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>     supervisor: {<0.71066.0>,rabbit_channel_sup}
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>     errorContext: shutdown_error
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>     reason: noproc
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>     offender: [{pid,<0.71069.0>},
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                {id,channel},
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                {mfargs,
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                    {rabbit_channel,start_link,
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                        [1,<0.71060.0>,<0.71067.0>,<0.71060.0>,
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                         <<"192.168.1.102:57986 -> 172.18.0.2:5672">>,
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                         rabbit_framing_amqp_0_9_1,
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                         {user,<<"root">>,
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                             [administrator],
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                             [{rabbit_auth_backend_internal,
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                                  #Fun<rabbit_auth_backend_internal.3.111050101>}]},
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                         <<"/">>,
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                         [{<<"connection.blocked">>,bool,true},
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                          {<<"consumer_cancel_notify">>,bool,true},
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                          {<<"basic.nack">>,bool,true},
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                          {<<"publisher_confirms">>,bool,true}],
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                         <0.71061.0>,<0.71068.0>]}},
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                {restart_type,transient},
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                {significant,true},
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                {shutdown,70000},
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>                {child_type,worker}]
+2026-02-04 22:24:24.988990+08:00 [error] <0.71066.0>
+*/
+func notifyBlocked(conn *amqp.Connection) {
+	// 增加监听，打印报警日志
+	blocked := make(chan amqp.Blocking)
+	conn.NotifyBlocked(blocked)
+	go func() {
+		for b := range blocked {
+			if b.Active {
+				log.Printf("rabbitmq-log:警告！服务器资源不足，连接被阻塞: %s", b.Reason)
+			} else {
+				log.Printf("rabbitmq-log:连接阻塞已解除")
+			}
+		}
+		log.Printf("rabbitmq-log:连接已断开，停止阻塞状态监听") // 验证协程是否销毁
+	}()
+}
+
 // 抽取公用的带超时创建函数
 func createChannelWithTimeout(conn *amqp.Connection, timeout time.Duration) (*amqp.Channel, error) {
 	type res struct {
@@ -226,26 +291,48 @@ func createChannelWithTimeout(conn *amqp.Connection, timeout time.Duration) (*am
 	}
 }
 
+// Get 改造：看灯说话，灯红排队
 func (p *channelPool) Get() (*amqp.Channel, error) {
-	for {
+	for { // 使用 for 循环替代递归
+		// 1. 如果正在重连，静默排队
+		if atomic.LoadInt32(&MQ.isConnecting) == 1 {
+			MQ.reconnectCond.L.Lock()
+			for atomic.LoadInt32(&MQ.isConnecting) == 1 {
+				log.Println("rabbitmq-log: 连接恢复中，请求排队...")
+				MQ.reconnectCond.Wait()
+			}
+			MQ.reconnectCond.L.Unlock()
+			// 唤醒后重新开始循环，此时会走下面的逻辑拿到新池子
+			continue
+		}
+
+		// 2. 检查：我是不是过时的池子
+		if MQ.pubPool != p {
+			return MQ.pubPool.Get() // 指向新池子（仅这一层跳转，不再递归）
+		}
+
+		// 3. 正常尝试拿通道
 		select {
 		case ch, ok := <-p.channels:
-			if !ok {
-				return nil, errors.New("channel pool is closed")
+			if ok && !ch.IsClosed() {
+				return ch, nil
 			}
-			if ch.IsClosed() {
-				continue // 通道已关闭，继续取下一个
-			}
-			return ch, nil
 		default:
-			// 池子空了，尝试新建。
-			// 关键：这里不再无限等待，而是给 conn.Channel() 一个 5 秒的硬超时
-			ch, err := createChannelWithTimeout(p.conn, 5*time.Second)
-			if err != nil {
-				return nil, fmt.Errorf("channel create failed: %w", err)
-			}
-			return ch, nil
 		}
+
+		// 4. 新建通道
+		ch, err := createChannelWithTimeout(p.conn, 5*time.Second)
+		if err != nil {
+			log.Printf("rabbitmq-log: 创建通道失败: %v，尝试重连", err)
+			if atomic.CompareAndSwapInt32(&MQ.isConnecting, 0, 1) {
+				p.conn.Close()
+			}
+			// 建议在这里加一个微小的 Sleep
+			time.Sleep(100 * time.Millisecond)
+			// 重试循环
+			continue
+		}
+		return ch, nil
 	}
 }
 
@@ -260,14 +347,32 @@ func (p *channelPool) Put(ch *amqp.Channel) {
 // 监控连接状态
 func (c *Client) monitorConnection() {
 	notifyClose := c.conn.NotifyClose(make(chan *amqp.Error))
+	// 增加一个定时器，每 5 分钟尝试检查一次连接状态（主动心跳辅助）
+	// 即使 NotifyClose 没反应，这里的逻辑也能作为兜底
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
 
-	select {
-	case <-c.closeChan:
-		log.Println("rabbitmq-log:Connection closed manual-lock")
-		return
-	case err := <-notifyClose:
-		log.Printf("rabbitmq-log:Connection closed: %v\n", err)
-		c.reconnect()
+	for {
+		select {
+		case <-c.closeChan:
+			log.Println("rabbitmq-log:收到手动关闭信号，停止监控")
+			return
+		case err, ok := <-notifyClose:
+			if !ok {
+				log.Println("rabbitmq-log:连接通知通道已关闭，尝试重连...")
+			} else {
+				log.Printf("rabbitmq-log:检测到连接断开: %v\n", err)
+			}
+			c.reconnect()
+			return // 重连后退出旧的监控，新的在 reconnect 里启动
+		case <-ticker.C:
+			// 主动探测：如果此时连接已经 Closed 却没触发上面的 case
+			if c.conn.IsClosed() {
+				log.Println("rabbitmq-log:主动巡检发现连接已断开，触发重连")
+				c.reconnect()
+				return
+			}
+		}
 	}
 }
 
@@ -275,12 +380,22 @@ func (c *Client) monitorConnection() {
 func (c *Client) reconnect() {
 	// 如果正在关闭，直接退出，不要再重连
 	if c.shuttingDown.Load() {
-		log.Println("rabbitmq-log:Detected client is closing, skipping reconnect.")
+		log.Println("rabbitmq-log:检测到客户端正在关闭，跳过重新连接")
 		return
 	}
+
+	// 确保状态为 1（正在重连）
+	atomic.StoreInt32(&c.isConnecting, 1)
+	defer func() {
+		atomic.StoreInt32(&c.isConnecting, 0)
+		c.reconnectCond.L.Lock()
+		c.reconnectCond.Broadcast() // 无论成功失败，都得让排队的人出来（失败了他们会再次触发重连）
+		c.reconnectCond.L.Unlock()
+	}()
+
 	c.mu.Lock()
 
-	log.Println("rabbitmq-log:Attempting to reconnect...")
+	log.Println("rabbitmq-log:正在重建连接资源...")
 
 	// 1. 备份旧资源
 	oldConn := c.conn
@@ -290,13 +405,14 @@ func (c *Client) reconnect() {
 	newConn, err := createConnectionWithRetry(c.config)
 	if err != nil {
 		c.mu.Unlock() // 记得解锁
-		log.Printf("rabbitmq-log:Permanent reconnect failure: %v\n", err)
+		log.Printf("rabbitmq-log:重连彻底失败: %v。业务请求将被放行并触发下一轮探测。", err)
 		return
 	}
 
 	// 3. 替换新资源
 	c.conn = newConn
 	c.pubPool = newChannelPool(newConn, c.config.PublisherPoolSize)
+	notifyBlocked(newConn)
 
 	// 4. 重置队列缓存
 	// 清空已声明队列记录，因为连接已重建
@@ -305,13 +421,30 @@ func (c *Client) reconnect() {
 	c.queueMu.Unlock()
 
 	c.mu.Unlock() // 此时新连接已就绪，可以解锁让发布者使用了
-	// 5. 异步优雅关闭旧资源
-	// 为什么要异步？因为 Close() 可能会因为网络 IO 阻塞一会儿，不能卡住重连流程
-	go func(conn *amqp.Connection, pool *channelPool) {
+
+	// 5. 异步优雅关闭旧资源 为什么要异步？因为 Close() 可能会因为网络 IO 阻塞一会儿，不能卡住重连流程
+	go clearOldConn(oldConn, oldPool)
+	// 消费者核心恢复逻辑
+	go c.consumerRegistryFunc()
+	// 重新监控
+	go c.monitorConnection()
+
+	log.Println("rabbitmq-log: 重连成功，已唤醒业务请求。")
+}
+
+// 异步优雅关闭旧资源
+func clearOldConn(conn *amqp.Connection, pool *channelPool) {
+	log.Println("rabbitmq-log:开始清理旧连接资源...")
+
+	// 给清理操作设置一个总超时，防止因为网络 IO 导致 goroutine 永久挂起
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+
+	cleanupDone := make(chan struct{})
+
+	go func() {
 		if pool != nil {
-			// 关闭池子通道，防止新的 Get 进入（虽然此时 c.pubPool 已指向新池子）
 			close(pool.channels)
-			// 循环关闭池内现有的通道
 			for ch := range pool.channels {
 				if !ch.IsClosed() {
 					_ = ch.Close()
@@ -319,20 +452,28 @@ func (c *Client) reconnect() {
 			}
 		}
 		if conn != nil && !conn.IsClosed() {
-			_ = conn.Close() // 关闭底层连接，这会自动关闭所有关联的 Channel
+			_ = conn.Close()
 		}
-		log.Println("rabbitmq-log:Old connection resources cleaned up successfully.")
-	}(oldConn, oldPool)
+		close(cleanupDone)
+	}()
 
-	log.Println("rabbitmq-log:Reconnected successfully. Starting consumer recovery...")
+	select {
+	case <-cleanupDone:
+		log.Println("rabbitmq-log:旧资源已优雅回收")
+	case <-timer.C:
+		log.Println("rabbitmq-log:清理旧资源超时，强制放弃（可能连接已完全僵死）")
+	}
+	log.Println("rabbitmq-log:已成功清理旧连接资源")
+}
 
-	// 消费者核心恢复逻辑
+// 消费者核心恢复逻辑
+func (c *Client) consumerRegistryFunc() {
 	c.consumerRegistry.Range(func(key, value any) bool {
 		state := value.(*ConsumerState)
 		// 使用一个新的 goroutine 重新启动消费者，避免阻塞重连逻辑
 		go func() {
 			time.Sleep(time.Duration(rand.Intn(200)) * time.Millisecond) // 随机错峰 0-200ms
-			log.Printf("rabbitmq-log:Attempting to recover consumer: %s\n", key)
+			log.Printf("rabbitmq-log:尝试恢复消费者: %s\n", key)
 			// 重新声明队列（因为连接断开，声明可能丢失）
 			// 注意：这里假设所有消费者都需要持久化队列（工作队列模式）
 			c.DeclareQueue(&QueueOption{
@@ -343,16 +484,13 @@ func (c *Client) reconnect() {
 			// 重新调用 Consume。由于 Consume 内部会创建新通道、设置 QoS 并启动新的监听循环，
 			// 且注册表已存在，因此这是安全的。
 			if err := c.Consume(context.Background(), state.Option, state.Handler); err != nil {
-				log.Printf("rabbitmq-log:Failed to recover consumer %s: %v\n", key, err)
+				log.Printf("rabbitmq-log:恢复消费者失败 %s: %v\n", key, err)
 				// 恢复失败，从注册表中删除 (可选，如果希望永久失败则删除)
 				// c.consumerRegistry.Delete(key)
 			}
 		}()
 		return true // 继续迭代下一个
 	})
-
-	log.Println("rabbitmq-log:Consumer recovery process initiated.")
-	go c.monitorConnection()
 }
 
 // Close 关闭客户端
@@ -384,14 +522,26 @@ type ExchangeOption struct {
 	Args       amqp.Table // 额外参数
 }
 
-func (c *Client) DeclareExchange(opt ExchangeOption) error {
+func (c *Client) DeclareExchange(opt ExchangeOption) (err error) {
 	ch, err := c.pubPool.Get()
 	if err != nil {
 		return err
 	}
-	defer c.pubPool.Put(ch)
+	var channelClosed bool
+	// 2. 归还逻辑
+	defer func() {
+		if ch != nil {
+			if channelClosed {
+				ch.Close()
+				return
+			}
+			if !ch.IsClosed() {
+				c.pubPool.Put(ch)
+			}
+		}
+	}()
 
-	return ch.ExchangeDeclare(
+	err = ch.ExchangeDeclare(
 		opt.Name,
 		opt.Kind,
 		opt.Durable,
@@ -400,6 +550,11 @@ func (c *Client) DeclareExchange(opt ExchangeOption) error {
 		opt.NoWait,
 		opt.Args,
 	)
+	if err != nil {
+		channelClosed = true
+		return err
+	}
+	return nil
 }
 
 // QueueOption 声明队列参数
@@ -428,7 +583,19 @@ func (c *Client) DeclareQueue(opt *QueueOption) error {
 	if err != nil {
 		return err
 	}
-	defer c.pubPool.Put(ch)
+	var channelClosed bool
+	// 2. 归还逻辑
+	defer func() {
+		if ch != nil {
+			if channelClosed {
+				ch.Close()
+				return
+			}
+			if !ch.IsClosed() {
+				c.pubPool.Put(ch)
+			}
+		}
+	}()
 
 	// 2. 声明队列
 	queue, err := ch.QueueDeclare(
@@ -440,10 +607,11 @@ func (c *Client) DeclareQueue(opt *QueueOption) error {
 		opt.Args,
 	)
 	if err != nil {
+		channelClosed = true
 		return err
 	}
 
-	log.Printf("rabbitmq-log:queue declare %s\n", queue.Name)
+	log.Printf("rabbitmq-log:队列声明 %s\n", queue.Name)
 
 	// 3. 回填队列名 (必须保留，因为 BindQueue 和 Consume 需要实际名字)
 	if opt.Name == "" {
@@ -463,24 +631,41 @@ func (c *Client) DeclareQueue(opt *QueueOption) error {
 }
 
 // BindQueue 队列绑定
-func (c *Client) BindQueue(queue, key, exchange string) error {
+func (c *Client) BindQueue(queue, key, exchange string) (err error) {
 	// 检查队列名称是否为空
 	if queue == "" {
-		return fmt.Errorf("queue name cannot be empty")
+		return fmt.Errorf("队列名不可为空")
 	}
 	ch, err := c.pubPool.Get()
 	if err != nil {
 		return err
 	}
-	defer c.pubPool.Put(ch)
+	var channelClosed bool
+	// 2. 归还逻辑
+	defer func() {
+		if ch != nil {
+			if channelClosed {
+				ch.Close()
+				return
+			}
+			if !ch.IsClosed() {
+				c.pubPool.Put(ch)
+			}
+		}
+	}()
 
-	return ch.QueueBind(
+	err = ch.QueueBind(
 		queue,
 		key,
 		exchange,
 		false, // noWait
 		nil,
 	)
+	if err != nil {
+		channelClosed = true
+		return err
+	}
+	return nil
 }
 
 // PublishOption 发布消息参数
