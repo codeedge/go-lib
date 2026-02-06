@@ -429,7 +429,7 @@ func (c *Client) reconnect() {
 	// 重新监控
 	go c.monitorConnection()
 
-	log.Println("rabbitmq-log: 重连成功，已唤醒业务请求。")
+	log.Println("rabbitmq-log:重连成功，已唤醒业务请求。")
 }
 
 // 异步优雅关闭旧资源
