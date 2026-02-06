@@ -680,6 +680,34 @@ type PublishOption struct {
 
 func (c *Client) Publish(ctx context.Context, opt *PublishOption, body []byte) (err error) {
 	log.Printf("rabbitmq-log:Publish info for Exchange:%s RoutingKey:%s body:%s\n", opt.Exchange, opt.RoutingKey, string(body))
+
+	// 增加重试循环：一共尝试 7 次
+	for i := 0; i < 7; i++ {
+		// 这里直接调用你原来的业务逻辑（或者封装好的 doPublish）
+		err = c.doPublish(ctx, opt, body)
+		if err == nil {
+			return nil
+		}
+
+		// 只要发生错误且还没到最后一次，就重试
+		if i < 6 {
+			// 指数退避：1s, 2s, 4s, 8s, 16s, 32s
+			waitTime := time.Duration(1<<i) * time.Second
+			log.Printf("rabbitmq-log:发送失败(第%d次), %v 后重试: %v", i+1, waitTime, err)
+
+			select {
+			case <-time.After(waitTime):
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return err
+}
+
+func (c *Client) doPublish(ctx context.Context, opt *PublishOption, body []byte) (err error) {
+	log.Printf("rabbitmq-log:Publish info for Exchange:%s RoutingKey:%s body:%s\n", opt.Exchange, opt.RoutingKey, string(body))
 	if opt.RoutingKey == "" && opt.Exchange == "" {
 		return fmt.Errorf("路由键和交换机名称不能同时为空")
 	}
