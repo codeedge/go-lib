@@ -3,11 +3,12 @@ package rabbitmq
 import (
 	"context"
 	"fmt"
-	"github.com/codeedge/go-lib/lib/exit"
-	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
 	"testing"
 	"time"
+
+	"github.com/codeedge/go-lib/lib/exit"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // 生产者（发布/订阅模式）
@@ -25,7 +26,7 @@ func Test1(t *testing.T) {
 	}
 
 	// 声明 Fanout 交换机
-	err = MQ.DeclareExchange(ExchangeOption{
+	err = Client().DeclareExchange(ExchangeOption{
 		Name:       "logs",
 		Kind:       "fanout",
 		Durable:    false,
@@ -37,7 +38,7 @@ func Test1(t *testing.T) {
 
 	for i := 0; ; i++ {
 		msg := fmt.Sprintf("Log message %d", i)
-		err := MQ.Publish(context.Background(), &PublishOption{
+		err := Client().Publish(context.Background(), &PublishOption{
 			Exchange:    "logs",
 			RoutingKey:  "",
 			ContentType: "text/plain",
@@ -68,7 +69,7 @@ func Test2(t *testing.T) {
 
 	queueName := "test-queue"
 	// 声明临时队列
-	err = MQ.DeclareQueue(&QueueOption{
+	err = Client().DeclareQueue(&QueueOption{
 		Name:       queueName,
 		Durable:    false,
 		AutoDelete: true,
@@ -79,12 +80,12 @@ func Test2(t *testing.T) {
 	}
 
 	// 绑定到交换机
-	if err := MQ.BindQueue(queueName, "", "logs"); err != nil {
+	if err := Client().BindQueue(queueName, "", "logs"); err != nil {
 		log.Fatal(err)
 	}
 
 	// 开始消费
-	err = MQ.Consume(context.Background(), &ConsumeOption{
+	err = Client().Consume(context.Background(), &ConsumeOption{
 		Queue:   queueName,
 		AutoAck: true,
 	}, func(d amqp.Delivery) {
@@ -116,7 +117,7 @@ func TestReConnect(t *testing.T) {
 	queueName := "test-queue"
 
 	// 声明 Fanout 交换机
-	err = MQ.DeclareQueue(&QueueOption{
+	err = Client().DeclareQueue(&QueueOption{
 		Name:       queueName,
 		Durable:    true,
 		AutoDelete: false,
@@ -126,7 +127,7 @@ func TestReConnect(t *testing.T) {
 	}
 
 	msg := fmt.Sprintf("Log message %d", 1111)
-	err = MQ.Publish(context.Background(), &PublishOption{
+	err = Client().Publish(context.Background(), &PublishOption{
 		Exchange:    "",
 		RoutingKey:  queueName,
 		ContentType: "text/plain",
@@ -140,7 +141,7 @@ func TestReConnect(t *testing.T) {
 	}
 
 	// 开始消费
-	err = MQ.Consume(context.Background(), &ConsumeOption{
+	err = Client().Consume(context.Background(), &ConsumeOption{
 		Queue:   queueName,
 		AutoAck: true,
 	}, func(d amqp.Delivery) {
@@ -153,10 +154,10 @@ func TestReConnect(t *testing.T) {
 
 	time.Sleep(3 * time.Second)
 
-	MQ.Close() // close测试
+	Client().Close() // close测试
 
 	msg = fmt.Sprintf("Log message %d", 222)
-	err = MQ.Publish(context.Background(), &PublishOption{
+	err = Client().Publish(context.Background(), &PublishOption{
 		Exchange:    "",
 		RoutingKey:  queueName,
 		ContentType: "text/plain",
@@ -170,7 +171,7 @@ func TestReConnect(t *testing.T) {
 	}
 
 	// 开始消费
-	err = MQ.Consume(context.Background(), &ConsumeOption{
+	err = Client().Consume(context.Background(), &ConsumeOption{
 		Queue:   queueName,
 		AutoAck: true,
 	}, func(d amqp.Delivery) {

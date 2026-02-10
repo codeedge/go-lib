@@ -37,7 +37,7 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	// 3. 清理资源
-	MQ.Close()
+	Client().Close()
 
 	os.Exit(code)
 }
@@ -51,7 +51,7 @@ func setupQueueAndExchange(t *testing.T, exchangeName, queueName, kind, routingK
 	t.Helper()
 
 	// 1. 声明交换机
-	err := MQ.DeclareExchange(ExchangeOption{
+	err := Client().DeclareExchange(ExchangeOption{
 		Name:       exchangeName,
 		Kind:       kind,
 		Durable:    true,
@@ -60,7 +60,7 @@ func setupQueueAndExchange(t *testing.T, exchangeName, queueName, kind, routingK
 	require.NoError(t, err, "DeclareExchange failed")
 
 	// 2. 声明队列
-	err = MQ.DeclareQueue(&QueueOption{
+	err = Client().DeclareQueue(&QueueOption{
 		Name:       queueName,
 		Durable:    true,
 		AutoDelete: false,
@@ -69,7 +69,7 @@ func setupQueueAndExchange(t *testing.T, exchangeName, queueName, kind, routingK
 	require.NoError(t, err, "DeclareQueue failed")
 
 	// 3. 绑定队列
-	err = MQ.BindQueue(queueName, routingKey, exchangeName)
+	err = Client().BindQueue(queueName, routingKey, exchangeName)
 	require.NoError(t, err, "BindQueue failed")
 }
 
@@ -82,13 +82,13 @@ func TestPublishToQueue(t *testing.T) {
 	data := map[string]string{"message": "hello simple queue"}
 
 	// 声明队列 (PublishToQueue内部会调用DeclareQueue, 这里先手动确保存在)
-	err := MQ.DeclareQueue(&QueueOption{
+	err := Client().DeclareQueue(&QueueOption{
 		Name: queueName, Durable: true,
 	})
 	require.NoError(t, err, "Setup DeclareQueue failed")
 
 	// 执行发布
-	err = MQ.PublishToQueue(context.Background(), queueName, data)
+	err = Client().PublishToQueue(context.Background(), queueName, data)
 	assert.NoError(t, err, "PublishToQueue failed")
 
 	// 验证消息是否到达 (通过消费验证，后续TestConsumeFromQueue会更详细)
@@ -100,13 +100,13 @@ func TestPublishToFanout(t *testing.T) {
 	data := map[string]string{"message": "hello fanout"}
 
 	// 设置 Fanout 交换机
-	err := MQ.DeclareExchange(ExchangeOption{
+	err := Client().DeclareExchange(ExchangeOption{
 		Name: exchangeName, Kind: "fanout", Durable: true,
 	})
 	require.NoError(t, err, "Setup DeclareExchange failed")
 
 	// 执行发布
-	err = MQ.PublishToFanout(context.Background(), exchangeName, data)
+	err = Client().PublishToFanout(context.Background(), exchangeName, data)
 	assert.NoError(t, err, "PublishToFanout failed")
 }
 
@@ -116,13 +116,13 @@ func TestPublishToRoutingKey(t *testing.T) {
 	data := map[string]string{"message": "hello direct"}
 
 	// 设置 Direct 交换机
-	err := MQ.DeclareExchange(ExchangeOption{
+	err := Client().DeclareExchange(ExchangeOption{
 		Name: exchangeName, Kind: "direct", Durable: true,
 	})
 	require.NoError(t, err, "Setup DeclareExchange failed")
 
 	// 执行发布
-	err = MQ.PublishToDirect(context.Background(), exchangeName, routingKey, data)
+	err = Client().PublishToDirect(context.Background(), exchangeName, routingKey, data)
 	assert.NoError(t, err, "PublishToRoutingKey failed")
 }
 
@@ -141,7 +141,7 @@ func TestConsumeFromQueue_SuccessAndPermanentFailure(t *testing.T) {
 	permanentFailData := MockData{Content: "should_nack_no_requeue"}
 
 	// 1. 设置队列
-	err := MQ.DeclareQueue(&QueueOption{Name: queueName, Durable: true})
+	err := Client().DeclareQueue(&QueueOption{Name: queueName, Durable: true})
 	require.NoError(t, err, "Setup DeclareQueue failed")
 
 	// 2. 定义状态追踪
@@ -174,17 +174,17 @@ func TestConsumeFromQueue_SuccessAndPermanentFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err = MQ.ConsumeFromQueue(ctx, queueName, false, handler) // 手动确认
+	err = Client().ConsumeFromQueue(ctx, queueName, false, handler) // 手动确认
 	require.NoError(t, err, "ConsumeFromQueue failed to start")
 	time.Sleep(100 * time.Millisecond) // 确保消费者启动
 
 	// 5. 发布消息
 	// 确保 PermanentFailure 消息只被消费一次
-	err = MQ.PublishToQueue(ctx, queueName, permanentFailData)
+	err = Client().PublishToQueue(ctx, queueName, permanentFailData)
 	require.NoError(t, err, "Publish permanent fail message failed")
 
 	// 确保 Success 消息被消费
-	err = MQ.PublishToQueue(ctx, queueName, successData)
+	err = Client().PublishToQueue(ctx, queueName, successData)
 	require.NoError(t, err, "Publish success message failed")
 
 	// 6. 验证结果
@@ -226,7 +226,7 @@ func TestConsumeFromFanout(t *testing.T) {
 		}
 
 		// 注意：第一个消费者启动时会声明 Exchange/Queue/Bind
-		err := MQ.ConsumeFromFanout(ctx, exchangeName, queueName, true, handler) // AutoAck=true
+		err := Client().ConsumeFromFanout(ctx, exchangeName, queueName, true, handler) // AutoAck=true
 		assert.NoError(t, err, "Consumer 1 failed to start")
 		<-ctx.Done() // 等待取消
 	}()
@@ -243,7 +243,7 @@ func TestConsumeFromFanout(t *testing.T) {
 			return nil
 		}
 
-		err := MQ.ConsumeFromFanout(ctx, exchangeName, queueName, true, handler)
+		err := Client().ConsumeFromFanout(ctx, exchangeName, queueName, true, handler)
 		assert.NoError(t, err, "Consumer 2 failed to start")
 		<-ctx.Done()
 	}()
@@ -252,7 +252,7 @@ func TestConsumeFromFanout(t *testing.T) {
 
 	// 2. 发布消息
 	testMessage := "Broadcast Test"
-	err := MQ.PublishToFanout(context.Background(), exchangeName, testMessage)
+	err := Client().PublishToFanout(context.Background(), exchangeName, testMessage)
 	require.NoError(t, err, "Publish to Fanout failed")
 
 	// 3. 验证两个消费者都收到了消息
@@ -278,7 +278,7 @@ func TestConsumeWorkQueue_Qos(t *testing.T) {
 	queueName := "test_work_queue_qos"
 
 	// 1. 设置队列
-	err := MQ.DeclareQueue(&QueueOption{Name: queueName, Durable: true})
+	err := Client().DeclareQueue(&QueueOption{Name: queueName, Durable: true})
 	require.NoError(t, err, "Setup DeclareQueue failed")
 
 	// 2. 启动两个工作消费者，QoS=1
@@ -296,7 +296,7 @@ func TestConsumeWorkQueue_Qos(t *testing.T) {
 		receivedCount <- "Consumer1"
 		return nil
 	}
-	err = MQ.ConsumeWorkQueue(ctx1, queueName, "worker1", 1, handler1) // QoS=1
+	err = Client().ConsumeWorkQueue(ctx1, queueName, "worker1", 1, handler1) // QoS=1
 	require.NoError(t, err, "Worker 1 failed to start")
 
 	// 消费者 2
@@ -308,14 +308,14 @@ func TestConsumeWorkQueue_Qos(t *testing.T) {
 		receivedCount <- "Consumer2"
 		return nil
 	}
-	err = MQ.ConsumeWorkQueue(ctx2, queueName, "worker2", 1, handler2) // QoS=1
+	err = Client().ConsumeWorkQueue(ctx2, queueName, "worker2", 1, handler2) // QoS=1
 	require.NoError(t, err, "Worker 2 failed to start")
 
 	time.Sleep(200 * time.Millisecond) // 确保消费者启动
 
 	// 3. 发布消息 (4条消息)
 	for i := 0; i < 4; i++ {
-		err = MQ.PublishToQueue(ctx1, queueName, fmt.Sprintf("Task %d", i))
+		err = Client().PublishToQueue(ctx1, queueName, fmt.Sprintf("Task %d", i))
 		require.NoError(t, err, "Publish task failed")
 	}
 
@@ -341,10 +341,10 @@ func TestDLX(t *testing.T) {
 	orderData := []byte("OrderID:123456")
 	// 1 用户下单时 (发送 10 分钟延迟)：
 	// 延迟 600,000 毫秒 (10分钟)
-	MQ.PublishDelay(ctx, "order.cancel", orderData, 600000)
+	Client().PublishDelay(ctx, "order.cancel", orderData, 600000)
 
 	// 2 后台取消服务 (启动监听)：
-	MQ.ConsumeDelay(ctx, "order.cancel", func(data []byte) error {
+	Client().ConsumeDelay(ctx, "order.cancel", func(data []byte) error {
 		// 1. 解析订单ID
 		// 2. 查数据库：如果还是待支付，则执行取消
 		// 3. 返回 nil (Ack)
@@ -358,18 +358,18 @@ func TestHash(t *testing.T) {
 	// 生产者代码示例：
 	// 每次发消息，都把 ID 传进去
 	smsID := "123456789"
-	MQ.PublishToHashExchange(ctx, "sms_hash_ex", smsID, smsRecord)
+	Client().PublishToHashExchange(ctx, "sms_hash_ex", smsID, smsRecord)
 
 	// 消费者代码示例：
 	// 为了保证批处理不乱序，建议每个节点对应一个独立的队列（例如队列名加节点序号）。如果多个节点共用一个队列，RabbitMQ 默认的循环分发（Round-Robin）依然可能导致消息在进入 smsCache 之前就被分给了不同节点。
 	// 推荐做法：
 	// 节点 1
-	MQ.ConsumeFromHashExchange(ctx, "sms_hash_ex", "sms_q_1", "10", func(data []byte) error {
+	Client().ConsumeFromHashExchange(ctx, "sms_hash_ex", "sms_q_1", "10", func(data []byte) error {
 		return nil
 	})
 
 	// 节点 2
-	MQ.ConsumeFromHashExchange(ctx, "sms_hash_ex", "sms_q_2", "10", func(data []byte) error {
+	Client().ConsumeFromHashExchange(ctx, "sms_hash_ex", "sms_q_2", "10", func(data []byte) error {
 		return nil
 	})
 }
@@ -386,13 +386,13 @@ func TestLogicHashFullFlow(t *testing.T) {
 
 	// 1. 模拟【初始化/消费者】机器：创建队列环境
 	// 只需要调用一次，保证所有队列带上 x-single-active-consumer 属性
-	err := MQ.SetupLogicHashQueues(exchange, prefix, count)
+	err := Client().SetupLogicHashQueues(exchange, prefix, count)
 	require.NoError(t, err)
 
 	// 2. 模拟【机器 A】启动监听
 	go func() {
 		// 监听 0 号分片
-		MQ.ConsumeFromLogicHash(ctx, prefix, 0, 100, func(data []byte) error {
+		Client().ConsumeFromLogicHash(ctx, prefix, 0, 100, func(data []byte) error {
 			fmt.Println("机器 A 处理了消息:", string(data))
 			return nil
 		})
@@ -400,7 +400,7 @@ func TestLogicHashFullFlow(t *testing.T) {
 
 	// 3. 模拟【机器 B】启动监听（同样监听 0 号分片，模拟竞争）
 	go func() {
-		MQ.ConsumeFromLogicHash(ctx, prefix, 0, 100, func(data []byte) error {
+		Client().ConsumeFromLogicHash(ctx, prefix, 0, 100, func(data []byte) error {
 			fmt.Println("机器 B 处理了消息:", string(data))
 			return nil
 		})
@@ -412,7 +412,7 @@ func TestLogicHashFullFlow(t *testing.T) {
 	// 无论调用多少次，只要 smsID 不变，它永远进入 sms_task_0 (假设 hash 结果是 0)
 	for i := 1; i <= 3; i++ {
 		msg := fmt.Sprintf("短信内容 %d", i)
-		err := MQ.PublishToLogicHash(ctx, exchange, prefix, smsID, count, msg)
+		err := Client().PublishToLogicHash(ctx, exchange, prefix, smsID, count, msg)
 		assert.NoError(t, err)
 	}
 
@@ -445,7 +445,7 @@ func StartLogicHashConsumerDemo(ctx context.Context) error {
 	// --- 2. 预初始化：确保 50 个队列属性全部正确 (带上 SAC 特性) ---
 	// 无论是哪台机器先启动，都会执行这个幂等操作
 	log.Printf("正在初始化 %d 个逻辑分片队列...", queueCount)
-	err := MQ.SetupLogicHashQueues(exchangeName, routingPrefix, queueCount)
+	err := Client().SetupLogicHashQueues(exchangeName, routingPrefix, queueCount)
 	if err != nil {
 		return fmt.Errorf("初始化分片队列失败: %w", err)
 	}
@@ -461,7 +461,7 @@ func StartLogicHashConsumerDemo(ctx context.Context) error {
 		go func(qIdx int) {
 			// 调用你封装好的逻辑分片消费方法
 			// handler 内部就是你的业务入库逻辑（例如 smsCache 聚合）
-			err := MQ.ConsumeFromLogicHash(ctx, routingPrefix, qIdx, prefetchCount, func(data []byte) error {
+			err := Client().ConsumeFromLogicHash(ctx, routingPrefix, qIdx, prefetchCount, func(data []byte) error {
 				// -------------------------------------------------------
 				// 这里就是你的核心业务逻辑：
 				// 1. json.Unmarshal(data) -> 得到短信记录
@@ -502,7 +502,7 @@ func TestProductionLogicHashDemo(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		testID := int64(1000 + i)
 		msg := fmt.Sprintf("ID_%d_Data", testID)
-		err := MQ.PublishToLogicHash(ctx, exchange, prefix, testID, 50, msg)
+		err := Client().PublishToLogicHash(ctx, exchange, prefix, testID, 50, msg)
 		assert.NoError(t, err)
 	}
 
