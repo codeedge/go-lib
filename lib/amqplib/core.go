@@ -30,6 +30,7 @@ type Config struct {
 	RetryBaseInterval      int    // 重试基础间隔（秒）
 	PublisherPoolSize      int    // 生产者通道池大小
 	EnablePublisherConfirm bool   // 是否开启生产者确认模式
+	ConnectName            string // 连接名称
 }
 
 // Rabbit RabbitMQ 客户端
@@ -153,6 +154,7 @@ func createConnectionWithRetry(cfg Config) (*amqp.Connection, error) {
 			}
 			return conn, nil
 		},
+		Properties: amqp.Table{"connection_name": cfg.ConnectName},
 	}
 
 	conn, err = amqp.DialConfig(cfg.URL, amqpCfg)
