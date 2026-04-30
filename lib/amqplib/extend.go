@@ -168,7 +168,7 @@ func (r *Rabbit) ConsumeFromQueue(ctx context.Context, queueName string, autoAck
 
 // ConsumeWorkQueue 工作队列模式消费（带预取控制，简化调用）
 // queueName: 队列名称
-// consumerTag: 消费者标签
+// consumerTag: 消费者标签 拼接节点id即可，如果节点id是0-1023的循环方案也无所谓，目前主要是恢复时打印日志用
 // prefetchCount: 预取消息数量
 // handler: 消息处理函数
 func (r *Rabbit) ConsumeWorkQueue(ctx context.Context, queueName, consumerTag string, prefetchCount int, handler func(data []byte) error) error {
@@ -195,7 +195,7 @@ func (r *Rabbit) ConsumeWorkQueue(ctx context.Context, queueName, consumerTag st
 
 // ConsumeFromFanout 消费Fanout交换机的消息
 // exchangeName: 交换机名称
-// queueName: 队列名称（为空则自动创建临时队列） 发布订阅模式需要每个消费者使用不同的队列名，比如队列名拼上节点id
+// queueName: 队列名称（为空则自动创建临时队列） 发布订阅模式需要每个消费者使用不同的队列名，比如队列名拼上节点id(针对固定节点id的场景，比如从env获取) 如果节点id是0-1023的循环方案的则建议使用空的临时队列，否则重启服务后会产生很多无用队列
 // autoAck: 是否自动确认
 // handler: 消息处理函数
 func (r *Rabbit) ConsumeFromFanout(ctx context.Context, exchangeName, queueName string, autoAck bool, handler func(data []byte) error) error {
