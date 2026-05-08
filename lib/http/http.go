@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,12 +16,15 @@ import (
 
 // SharedClient 新增共享HTTP客户端（提升性能）
 var sharedClient = &http.Client{
-	Timeout: 60 * time.Second,
+	Timeout: 0, // 不设全局超时，完全由每个请求的 context 控制 如果设置了60秒，WithTimeout设置的值会和全局设置比，大于全局设置时取全局设置
 	Transport: &http.Transport{
 		MaxIdleConns:    100,
 		IdleConnTimeout: 90 * time.Second,
 	},
 }
+
+// 默认超时时间
+const defaultTimeout = 60 * time.Second
 
 // Client 客户端结构体
 type Client struct {
@@ -29,7 +33,8 @@ type Client struct {
 	body        io.Reader
 	headers     map[string]string
 	contentType string
-	debug       bool // 新增：控制是否打印请求详情
+	debug       bool          // 新增：控制是否打印请求详情
+	timeout     time.Duration // 新增：单次请求超时
 }
 
 func NewClient(url string, opts ...func(*Client)) *Client {
@@ -129,12 +134,28 @@ func WithDebug() func(*Client) {
 	}
 }
 
+// WithTimeout 设置本次请求的超时时间，不设置时默认 60 秒
+func WithTimeout(timeout time.Duration) func(*Client) {
+	return func(c *Client) {
+		c.timeout = timeout
+	}
+}
+
 func (c *Client) Do() (respBody []byte, err error) {
 	httpReq, err := http.NewRequest(c.method, c.url, c.body)
 	if err != nil {
 		fmt.Printf("http.NewRequest err: %v\n", err)
 		return nil, err
 	}
+
+	// 设置默认超时：没有通过 WithTimeout 指定时，使用 默认超时时间
+	if c.timeout == 0 {
+		c.timeout = defaultTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	defer cancel()
+	httpReq = httpReq.WithContext(ctx)
+
 	header := make(http.Header)
 	contentType := "application/json"
 	if len(c.contentType) > 0 {
