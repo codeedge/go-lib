@@ -76,7 +76,7 @@ type Service struct {
 	nodeId                       int                          // 节点id
 	clients                      map[int64]map[string]*Client // 存储所有本地客户端连接 map[uid]map[uuid]*Client
 	clientsSync                  sync.RWMutex                 // 读写锁
-	rdb                          *redis.Client                // Redis客户端
+	rdb                          redis.UniversalClient        // Redis客户端
 	ctx                          context.Context              // 上下文
 	redisSessionKeyPattern       string                       // 会话存储 记录用户-客户端对应的节点id 用于快速查找用户节点 key是uid:uuid val是node
 	redisSessionSetKey           string                       // 节点客户端集合 用于清理节点客户端 key是固定值+node val是uid:uuid
@@ -115,7 +115,7 @@ const (
 )
 
 // New 创建SSE服务实例
-func New(rds *redis.Client, nodeId int, serverName string, remoteServerNames ...string) *Service {
+func New(rds redis.UniversalClient, nodeId int, serverName string, remoteServerNames ...string) *Service {
 	SSE = &Service{
 		nodeId:  nodeId,
 		clients: make(map[int64]map[string]*Client),
