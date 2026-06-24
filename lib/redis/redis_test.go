@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	cache "github.com/mgtv-tech/jetcache-go"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -26,12 +25,6 @@ func TestNew(t *testing.T) {
 
 	if client.Rdb() == nil {
 		t.Error("Rdb should not be nil")
-	}
-	if client.GetCache() != nil {
-		t.Error("Cache should be nil before WithCache()")
-	}
-	if client.GetRs() != nil {
-		t.Error("Rs should be nil before WithLock()")
 	}
 }
 
@@ -119,26 +112,6 @@ func TestNewUniversal(t *testing.T) {
 
 	if client.Rdb() == nil {
 		t.Error("Rdb should not be nil")
-	}
-}
-
-func TestNewWithOptions(t *testing.T) {
-	options := &redis.Options{
-		Addr: "localhost:6379",
-		DB:   0,
-	}
-
-	client, err := New(options, WithCache(), WithLock())
-	if err != nil {
-		t.Skipf("Redis not available, skip test: %v", err)
-	}
-	defer client.Rdb().Close()
-
-	if client.GetCache() == nil {
-		t.Error("Cache should not be nil when WithCache option is used")
-	}
-	if client.GetRs() == nil {
-		t.Error("Rs should not be nil when WithLock option is used")
 	}
 }
 
@@ -562,6 +535,7 @@ func TestPubSubPattern(t *testing.T) {
 
 // ==================== Pipeline 测试 ====================
 
+// Pipeline 批量执行，减少网络往返，但不保证原子性
 func TestPipeline(t *testing.T) {
 	client, err := New(&redis.Options{Addr: "localhost:6379"})
 	if err != nil {
@@ -593,310 +567,233 @@ func TestPipeline(t *testing.T) {
 	client.Rdb().Del(ctx, "test:p1", "test:p2", "test:p3")
 }
 
-// ==================== 分布式锁测试 ====================
-
-// 基础锁测试 - 防止重复操作
-// 场景: 添加会员时，同一个账号同时只能一个请求处理
-func TestNewMutex(t *testing.T) {
-	client, err := New(&redis.Options{Addr: "localhost:6379"}, WithLock())
-	if err != nil {
-		t.Skipf("Redis not available: %v", err)
-	}
-	defer client.Rdb().Close()
-
-	// 模拟场景: Member.Add 中防止重复添加
-	account := "testuser"
-	lockKey := fmt.Sprintf("Member.%s", account)
-	mutex := client.NewMutex(lockKey)
-
-	// 加锁
-	if err := mutex.Lock(); err != nil {
-		t.Fatalf("Lock failed: %v", err)
-	}
-	defer func() {
-		if ok, err := mutex.Unlock(); !ok || err != nil {
-			t.Logf("Unlock failed: ok:%v err:%v", ok, err)
-		}
-	}()
-
-	// 模拟业务逻辑
-	t.Log("执行业务逻辑...")
-}
-
-// LockExtend - 带续租的锁，同步执行耗时任务
-func TestLockExtend(t *testing.T) {
-	client, err := New(&redis.Options{Addr: "localhost:6379"}, WithLock())
-	if err != nil {
-		t.Skipf("Redis not available: %v", err)
-	}
-	defer client.Rdb().Close()
-
-	// 模拟场景: 短信发送处理
-	lockKey := "lock:sms:process"
-	executed := false
-
-	client.LockExtend(lockKey, 30*time.Second, func() {
-		// 模拟耗时任务
-		time.Sleep(100 * time.Second)
-		executed = true
-	})
-
-	if !executed {
-		t.Error("Task should be executed")
-	}
-}
-
-// LockExtendGeneric - 带返回值的耗时任务
-func TestLockExtendGeneric(t *testing.T) {
-	client, err := New(&redis.Options{Addr: "localhost:6379"}, WithLock())
-	if err != nil {
-		t.Skipf("Redis not available: %v", err)
-	}
-	defer client.Rdb().Close()
-
-	// 模拟场景: 号码空号检测
-	type CheckResult struct {
-		ValidCount   int
-		InvalidCount int
-	}
-
-	lockKey := "lock:mobile:check"
-	result, err := LockExtendGeneric(client, lockKey, 30*time.Second, func() (CheckResult, error) {
-		// 模拟耗时检测任务
-		time.Sleep(100 * time.Second)
-		return CheckResult{ValidCount: 80, InvalidCount: 20}, nil
-	})
-	if err != nil {
-		t.Fatalf("LockExtendGeneric failed: %v", err)
-	}
-	if result.ValidCount != 80 || result.InvalidCount != 20 {
-		t.Errorf("LockExtendGeneric result = %+v", result)
-	}
-}
-
-// LockAwaitOnce - 分布式选举，多台机器只有一台执行任务
-// 场景: 定时任务初始化，保证集群中只有一台机器执行定时任务
-func TestLockAwaitOnce(t *testing.T) {
-	client, err := New(&redis.Options{Addr: "localhost:6379"}, WithLock())
-	if err != nil {
-		t.Skipf("Redis not available: %v", err)
-	}
-	defer client.Rdb().Close()
-
-	lockKey := "feige-cloud-backend-initCron-LockAwaitOnce"
-
-	// 模拟场景: 启动时初始化定时任务
-	client.LockAwaitOnce(lockKey, 30*time.Second, func() {
-		// 模拟初始化定时任务
-		// gcron.AddSingleton("*/10 * * * * *", func() { ... })
-		// gcron.AddSingleton("0 */30 * * * *", func() { ... })
-		t.Log("定时任务初始化完成")
-	})
-
-	// LockAwaitOnce 是异步的，让程序等待一段时间模拟运行
-	time.Sleep(5 * time.Second)
-}
-
-// LockAwaitOnce 带清理函数 - 续期失败时清理定时任务
-func TestLockAwaitOnceWithClear(t *testing.T) {
-	client, err := New(&redis.Options{Addr: "localhost:6379"}, WithLock())
-	if err != nil {
-		t.Skipf("Redis not available: %v", err)
-	}
-	defer client.Rdb().Close()
-
-	lockKey := "feige-cloud-backend-smsStat-LockAwaitOnce"
-
-	// 模拟场景: 短信统计任务，带清理函数
-	client.LockAwaitOnce(lockKey, 5*time.Second, func() {
-		// 模拟统计任务
-		// gcron.AddSingleton("0 0 * * * *", func() { ... })
-		t.Log("统计任务开始执行")
-	}, func() {
-		// 续期失败时清理，防止其他机器重复执行
-		// gcron.Remove("SmsStatTask")
-		t.Log("续期失败，清理定时任务")
-	})
-
-	// 让程序等待一段时间模拟运行
-	time.Sleep(10 * time.Second)
-}
-
-// ==================== Redlock 多实例锁测试 ====================
-
-// WithLock 多实例 - Redlock 模式
-func TestWithLockRedlock(t *testing.T) {
-	// 多实例 Redlock 模式
-	redlockOptions := []*redis.Options{
-		{Addr: "localhost:6379"},
-		{Addr: "localhost:6380"},
-		{Addr: "localhost:6381"},
-	}
-
-	client, err := New(&redis.Options{Addr: "localhost:6379"}, WithLock(redlockOptions...))
-	if err != nil {
-		t.Skipf("Redis not available: %v", err)
-	}
-	defer client.Rdb().Close()
-
-	if client.GetRs() == nil {
-		t.Skip("Redlock not initialized")
-	}
-
-	mutex := client.NewMutex("test:redlock")
-
-	if err := mutex.Lock(); err != nil {
-		t.Fatalf("Redlock Lock failed: %v", err)
-	}
-	defer func() {
-		if ok, err := mutex.Unlock(); !ok || err != nil {
-			t.Logf("Redlock Unlock failed: ok:%v err:%v", ok, err)
-		}
-	}()
-
-	t.Log("Redlock acquired successfully")
-}
-
-// ==================== 缓存测试 ====================
-
-func TestCacheOnce(t *testing.T) {
-	client, err := New(&redis.Options{Addr: "localhost:6379"}, WithCache())
+// TxPipeline 事务管道（MULTI/EXEC）
+// 保证：命令按顺序执行，不会被其他客户端的命令插入
+// 不保证：其中一个命令失败时，不会回滚已执行的命令
+// 与 Lua 脚本的区别：MULTI/EXEC 在 EXEC 之前就确定了所有命令，命令之间不能有逻辑判断；
+// Lua 脚本在服务端执行，可以在脚本里根据读取的值决定下一步操作
+func TestTxPipeline(t *testing.T) {
+	client, err := New(&redis.Options{Addr: "localhost:6379"})
 	if err != nil {
 		t.Skipf("Redis not available: %v", err)
 	}
 	defer client.Rdb().Close()
 	ctx := context.Background()
 
-	// 模拟实际使用: Cache.Once 带 TTL 和 Do 回调
-	type UserInfo struct {
-		Name string
-		Age  int
-	}
-	var user UserInfo
-	callCount := 0
-	key := "test:cache:user:1001"
+	// 初始化
+	client.Rdb().Set(ctx, "test:tx:a", "10", 0)
+	client.Rdb().Set(ctx, "test:tx:b", "20", 0)
 
-	err = client.GetCache().Once(ctx, key,
-		cache.Value(&user),
-		cache.TTL(10*time.Minute),
-		cache.Refresh(false),
-		cache.Do(func(ctx context.Context) (any, error) {
-			callCount++
-			// 模拟从数据库查询
-			return UserInfo{Name: "张三", Age: 25}, nil
-		}),
-	)
+	// TxPipeline 事务管道：原子执行（MULTI/EXEC）
+	pipe := client.Rdb().TxPipeline()
+	pipe.Incr(ctx, "test:tx:a")
+	pipe.IncrBy(ctx, "test:tx:b", 5)
+	cmds, err := pipe.Exec(ctx)
 	if err != nil {
-		t.Fatalf("Cache Once failed: %v", err)
+		t.Fatalf("TxPipeline Exec failed: %v", err)
 	}
-	if user.Name != "张三" || user.Age != 25 {
-		t.Errorf("Cache Once result = %+v, want {Name:张三 Age:25}", user)
-	}
-	if callCount != 1 {
-		t.Errorf("Function called %d times, want 1", callCount)
+	if len(cmds) != 2 {
+		t.Errorf("TxPipeline returned %d commands, want 2", len(cmds))
 	}
 
-	// 第二次调用应该使用缓存，不会执行 Do 函数
-	var user2 UserInfo
-	err = client.GetCache().Once(ctx, key,
-		cache.Value(&user2),
-		cache.TTL(10*time.Minute),
-		cache.Do(func(ctx context.Context) (any, error) {
-			callCount++
-			return UserInfo{Name: "李四", Age: 30}, nil
-		}),
-	)
-	if err != nil {
-		t.Fatalf("Cache Once second call failed: %v", err)
+	// 验证
+	valA, _ := client.Rdb().Get(ctx, "test:tx:a").Result()
+	if valA != "11" {
+		t.Errorf("tx:a = %q, want %q", valA, "11")
 	}
-	if user2.Name != "张三" {
-		t.Errorf("Cache hit should return cached value, got %+v", user2)
-	}
-	if callCount != 1 {
-		t.Errorf("Do function should not be called again, callCount = %d", callCount)
+	valB, _ := client.Rdb().Get(ctx, "test:tx:b").Result()
+	if valB != "25" {
+		t.Errorf("tx:b = %q, want %q", valB, "25")
 	}
 
-	// 清理缓存
-	client.GetCache().Delete(ctx, key)
+	// 清理
+	client.Rdb().Del(ctx, "test:tx:a", "test:tx:b")
 }
 
-func TestCacheDelete(t *testing.T) {
-	client, err := New(&redis.Options{Addr: "localhost:6379"}, WithCache())
+// ==================== Lua 脚本测试 ====================
+
+// Lua 脚本原子执行：脚本执行期间不会有其他命令插入（Redis 单线程）
+// 注意：这里的原子性指隔离性（不被插入），脚本内某个命令失败不会回滚已执行的命令
+func TestLuaScript(t *testing.T) {
+	client, err := New(&redis.Options{Addr: "localhost:6379"})
 	if err != nil {
 		t.Skipf("Redis not available: %v", err)
 	}
 	defer client.Rdb().Close()
 	ctx := context.Background()
 
-	// 先设置缓存
-	key := "test:cache:delete"
-	var val string
-	err = client.GetCache().Once(ctx, key,
-		cache.Value(&val),
-		cache.TTL(10*time.Minute),
-		cache.Do(func(ctx context.Context) (any, error) {
-			return "to-be-deleted", nil
-		}),
-	)
+	// 设置初始值
+	client.Rdb().Set(ctx, "test:lua:counter", "0", 0)
+
+	// Lua 原子递增脚本
+	script := redis.NewScript(`
+		local val = redis.call("INCR", KEYS[1])
+		return val
+	`)
+
+	// 执行 Lua 脚本
+	result, err := script.Run(ctx, client.Rdb(), []string{"test:lua:counter"}).Int()
 	if err != nil {
-		t.Fatalf("Cache Once failed: %v", err)
+		t.Fatalf("Lua script failed: %v", err)
+	}
+	if result != 1 {
+		t.Errorf("Lua INCR = %d, want 1", result)
 	}
 
-	// 删除缓存
-	err = client.GetCache().Delete(ctx, key)
+	// 再次执行
+	result, err = script.Run(ctx, client.Rdb(), []string{"test:lua:counter"}).Int()
 	if err != nil {
-		t.Fatalf("Cache Delete failed: %v", err)
+		t.Fatalf("Lua script second run failed: %v", err)
+	}
+	if result != 2 {
+		t.Errorf("Lua INCR = %d, want 2", result)
 	}
 
-	// 删除后再次调用应该重新执行 Do 函数
-	callCount := 0
-	err = client.GetCache().Once(ctx, key,
-		cache.Value(&val),
-		cache.TTL(10*time.Minute),
-		cache.Do(func(ctx context.Context) (any, error) {
-			callCount++
-			return "new-value", nil
-		}),
-	)
-	if err != nil {
-		t.Fatalf("Cache Once after delete failed: %v", err)
-	}
-	if callCount != 1 {
-		t.Errorf("Do function should be called after delete, callCount = %d", callCount)
-	}
-	if val != "new-value" {
-		t.Errorf("After delete, should get new value, got %q", val)
-	}
-}
+	// Lua 带参数的脚本
+	setScript := redis.NewScript(`
+		redis.call("SET", KEYS[1], ARGV[1])
+		return redis.call("GET", KEYS[1])
+	`)
 
-func TestCacheJoin(t *testing.T) {
-	// 模拟实际使用: 用 Join 拼接缓存 key
-	key := Join("user:info", 1001)
-	if key != "user:info:1001" {
-		t.Errorf("Join = %q, want %q", key, "user:info:1001")
+	val, err := setScript.Run(ctx, client.Rdb(), []string{"test:lua:set"}, "hello").Result()
+	if err != nil {
+		t.Fatalf("Lua set script failed: %v", err)
 	}
+	if val != "hello" {
+		t.Errorf("Lua SET = %q, want %q", val, "hello")
+	}
+
+	// 清理
+	client.Rdb().Del(ctx, "test:lua:counter", "test:lua:set")
 }
 
 // ==================== Join 测试 ====================
 
 func TestJoin(t *testing.T) {
-	tests := []struct {
-		key  string
-		args []any
-		want string
-	}{
-		{"", nil, ""},
-		{"key", nil, "key"},
-		{"", []any{"a", "b"}, "a:b"},
-		{"key", []any{"a", "b"}, "key:a:b"},
-		{"key", []any{"", "b"}, "key:b"},
-		{"key", []any{1, 2}, "key:1:2"},
+	if Join("key", "a", "b") != "key:a:b" {
+		t.Errorf("Join basic failed")
+	}
+	if Join("key", 1, 2) != "key:1:2" {
+		t.Errorf("Join int failed")
+	}
+	if Join("key", "", "b") != "key:b" {
+		t.Errorf("Join empty filter failed")
+	}
+	if Join("", nil) != "" {
+		t.Errorf("Join empty failed")
+	}
+}
+
+// ==================== Rdb 测试 ====================
+
+func TestRdb(t *testing.T) {
+	client, err := New(&redis.Options{Addr: "localhost:6379"})
+	if err != nil {
+		t.Skipf("Redis not available: %v", err)
+	}
+	defer client.Rdb().Close()
+
+	rdb := client.Rdb()
+	if rdb == nil {
+		t.Error("Rdb() should not return nil")
 	}
 
-	for _, tt := range tests {
-		got := Join(tt.key, tt.args...)
-		if got != tt.want {
-			t.Errorf("Join(%q, %v) = %q, want %q", tt.key, tt.args, got, tt.want)
+	// 验证 Rdb 可以正常执行命令
+	ctx := context.Background()
+	err = rdb.Set(ctx, "test:rdb", "ok", 10*time.Second).Err()
+	if err != nil {
+		t.Fatalf("Rdb Set failed: %v", err)
+	}
+	val, err := rdb.Get(ctx, "test:rdb").Result()
+	if err != nil {
+		t.Fatalf("Rdb Get failed: %v", err)
+	}
+	if val != "ok" {
+		t.Errorf("Rdb Get = %q, want %q", val, "ok")
+	}
+
+	rdb.Del(ctx, "test:rdb")
+}
+
+// ==================== 错误处理测试 ====================
+
+func TestNewConnectionRefused(t *testing.T) {
+	options := &redis.Options{
+		Addr: "localhost:9999", // 不存在的端口
+	}
+
+	_, err := New(options)
+	if err == nil {
+		t.Error("Expected error for connection refused, got nil")
+	}
+}
+
+func TestNewClusterConnectionRefused(t *testing.T) {
+	options := &redis.ClusterOptions{
+		Addrs: []string{":9999"},
+	}
+
+	_, err := NewCluster(options)
+	if err == nil {
+		t.Error("Expected error for cluster connection refused, got nil")
+	}
+}
+
+func TestNewRingConnectionRefused(t *testing.T) {
+	options := &redis.RingOptions{
+		Addrs: map[string]string{
+			"shard1": ":9999",
+		},
+	}
+
+	_, err := NewRing(options)
+	if err == nil {
+		t.Error("Expected error for ring connection refused, got nil")
+	}
+}
+
+// ==================== 并发测试 ====================
+
+func TestConcurrentAccess(t *testing.T) {
+	client, err := New(&redis.Options{Addr: "localhost:6379"})
+	if err != nil {
+		t.Skipf("Redis not available: %v", err)
+	}
+	defer client.Rdb().Close()
+	ctx := context.Background()
+
+	// 并发写入
+	done := make(chan bool, 10)
+	for i := 0; i < 10; i++ {
+		go func(n int) {
+			key := fmt.Sprintf("test:concurrent:%d", n)
+			client.Rdb().Set(ctx, key, fmt.Sprintf("val%d", n), 10*time.Second)
+			done <- true
+		}(i)
+	}
+
+	// 等待所有 goroutine 完成
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+
+	// 验证所有值
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("test:concurrent:%d", i)
+		val, err := client.Rdb().Get(ctx, key).Result()
+		if err != nil {
+			t.Fatalf("Get %s failed: %v", key, err)
+		}
+		expected := fmt.Sprintf("val%d", i)
+		if val != expected {
+			t.Errorf("Get %s = %q, want %q", key, val, expected)
 		}
 	}
+
+	// 清理
+	keys := make([]string, 10)
+	for i := 0; i < 10; i++ {
+		keys[i] = fmt.Sprintf("test:concurrent:%d", i)
+	}
+	client.Rdb().Del(ctx, keys...)
 }

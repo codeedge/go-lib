@@ -7,8 +7,6 @@ import (
 	"log"
 	"strings"
 
-	"github.com/go-redsync/redsync/v4"
-	cache "github.com/mgtv-tech/jetcache-go"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -16,40 +14,16 @@ import (
 
 // Client Redis 客户端封装
 type Client struct {
-	rdb   redis.UniversalClient
-	cache cache.Cache
-	rs    *redsync.Redsync
-}
-
-// Option 配置选项
-type Option func(*Client)
-
-// WithCache 启用二级缓存
-func WithCache() Option {
-	return func(c *Client) {
-		c.initCache()
-	}
-}
-
-// WithLock 启用分布式锁
-// 不传参数：使用当前连接（必须是单节点模式）
-// 传参数：使用指定的独立 Redis 实例（Redlock 模式，推荐 5 个节点）
-func WithLock(options ...*redis.Options) Option {
-	return func(c *Client) {
-		c.initLock(options...)
-	}
+	rdb redis.UniversalClient
 }
 
 // New 创建普通客户端
-func New(options *redis.Options, opts ...Option) (*Client, error) {
+func New(options *redis.Options) (*Client, error) {
 	c := &Client{
 		rdb: redis.NewClient(options),
 	}
 	if err := c.ping(); err != nil {
 		return nil, err
-	}
-	for _, opt := range opts {
-		opt(c)
 	}
 	return c, nil
 }
@@ -70,7 +44,7 @@ func New(options *redis.Options, opts ...Option) (*Client, error) {
 // NewFailover 创建哨兵模式1
 // 哨兵模式在主从模式的基础上增加了自动故障转移功能
 // sentinel哨兵会监控master和slave，当master挂了以后会自动选举新的master
-func NewFailover(options *redis.FailoverOptions, opts ...Option) (*Client, error) {
+func NewFailover(options *redis.FailoverOptions) (*Client, error) {
 	// &redis.FailoverOptions{
 	//    MasterName:    "master-name",
 	//    SentinelAddrs: []string{":9126", ":9127", ":9128"},
@@ -81,16 +55,13 @@ func NewFailover(options *redis.FailoverOptions, opts ...Option) (*Client, error
 	if err := c.ping(); err != nil {
 		return nil, err
 	}
-	for _, opt := range opts {
-		opt(c)
-	}
 	return c, nil
 }
 
 // NewFailoverCluster 创建哨兵模式2
 // 从 go-redis v8 版本开始，可以使用 NewFailoverClusterClient 把只读命令路由到从节点
 // 注意：NewFailoverClusterClient 借助了 Cluster Client 实现，不支持 DB 选项（只能操作 DB 0）
-func NewFailoverCluster(options *redis.FailoverOptions, opts ...Option) (*Client, error) {
+func NewFailoverCluster(options *redis.FailoverOptions) (*Client, error) {
 	// options = &redis.FailoverOptions{
 	//    MasterName:    "master-name",
 	//    SentinelAddrs: []string{":9126", ":9127", ":9128"},
@@ -104,9 +75,6 @@ func NewFailoverCluster(options *redis.FailoverOptions, opts ...Option) (*Client
 	}
 	if err := c.ping(); err != nil {
 		return nil, err
-	}
-	for _, opt := range opts {
-		opt(c)
 	}
 	return c, nil
 }
@@ -192,30 +160,26 @@ func (c *Client) Rdb() redis.UniversalClient {
 	return c.rdb
 }
 
-// GetCache 获取二级缓存
-func (c *Client) GetCache() cache.Cache {
-	return c.cache
-}
-
-// GetRs 获取分布式锁
-func (c *Client) GetRs() *redsync.Redsync {
-	return c.rs
-}
-
 // Join 拼接 cacheKey
+// 步骤1：转换所有参数为字符串并过滤空值
+// 步骤2：处理变长参数
+// 步骤3：拼接最终Key并处理边界情况
 func Join(key string, args ...any) string {
+	// 步骤1：转换所有参数为字符串并过滤空值
 	segments := make([]string, 0, len(args)+1)
 	if key != "" {
 		segments = append(segments, key)
 	}
 
+	// 步骤2：处理变长参数
 	for _, arg := range args {
 		s := fmt.Sprint(arg)
-		if s != "" {
+		if s != "" { // 过滤空字符串参数
 			segments = append(segments, s)
 		}
 	}
 
+	// 步骤3：拼接最终Key并处理边界情况
 	if len(segments) == 0 {
 		return ""
 	}
