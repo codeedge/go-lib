@@ -142,6 +142,8 @@ func WithTimeout(timeout time.Duration) func(*Client) {
 }
 
 func (c *Client) Do() (respBody []byte, err error) {
+	startTime := time.Now()
+
 	httpReq, err := http.NewRequest(c.method, c.url, c.body)
 	if err != nil {
 		fmt.Printf("http.NewRequest err: %v\n", err)
@@ -190,7 +192,8 @@ func (c *Client) Do() (respBody []byte, err error) {
 		return nil, fmt.Errorf("http.DO err: %v,resp.StatusCode:%d", err, resp.StatusCode)
 	}
 
-	fmt.Printf("http.Do info: url=%s,resp=%v\n", c.url, string(respBody))
+	elapsed := time.Since(startTime)
+	fmt.Printf("http.Do info: url=%s,resp=%v,耗时:%v\n", c.url, string(respBody), elapsed)
 
 	return respBody, nil
 }
