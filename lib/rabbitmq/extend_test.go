@@ -98,6 +98,27 @@ func TestPublishToRoutingKey(t *testing.T) {
 	assert.NoError(t, err, "PublishToRoutingKey failed")
 }
 
+// TestPublishToQueue_DurableConflict 测试队列属性冲突场景
+// 手动声明非持久化队列后，PublishToQueue 内部会尝试声明持久化队列，触发 406 PRECONDITION_FAILED
+// DeclareQueue 应自动处理此错误，不会影响消息发布
+func TestPublishToQueue_DurableConflict(t *testing.T) {
+	queueName := "test_queue_durable_conflict"
+
+	// 1. 手动声明非持久化队列（Durable: false）
+	err := MQ().DeclareQueue(&QueueOption{
+		Name:       queueName,
+		Durable:    false,
+		AutoDelete: true,
+	})
+	require.NoError(t, err, "Manual DeclareQueue failed")
+
+	// 2. 发布消息（PublishToQueue 内部 doPublish 会用 Durable: true 再次声明，触发 406）
+	// DeclareQueue 应自动忽略 406 错误，消息正常发布
+	data := map[string]string{"message": "durable conflict test"}
+	err = MQ().PublishToQueue(context.Background(), queueName, data)
+	assert.NoError(t, err, "PublishToQueue should handle 406 gracefully")
+}
+
 // -----------------------------------------------------------------------------
 // 测试消费方法 (包含重试逻辑测试)
 // -----------------------------------------------------------------------------
@@ -399,4 +420,265 @@ func TestProductionLogicHashDemo(t *testing.T) {
 	}
 
 	time.Sleep(2 * time.Second)
+}
+
+// -----------------------------------------------------------------------------
+// 测试优先级队列
+// -----------------------------------------------------------------------------
+
+// TestPublishToPriorityQueue 测试发布优先级消息
+func TestPublishToPriorityQueue(t *testing.T) {
+	initMQ()
+	queueName := "test_priority_queue_pub"
+
+	// 发布不同优先级的消息（不传 maxPriority，默认 10）
+	lowData := map[string]string{"level": "low", "msg": "普通消息"}
+	highData := map[string]string{"level": "high", "msg": "紧急消息"}
+
+	err := MQ().PublishToPriorityQueue(context.Background(), queueName, 1, lowData)
+	assert.NoError(t, err, "Publish low priority message failed")
+
+	err = MQ().PublishToPriorityQueue(context.Background(), queueName, 9, highData)
+	assert.NoError(t, err, "Publish high priority message failed")
+}
+
+// TestPublishToPriorityQueue_CustomMax 测试自定义 maxPriority
+func TestPublishToPriorityQueue_CustomMax(t *testing.T) {
+	initMQ()
+	queueName := "test_priority_queue_custom_max"
+
+	// 传入自定义 maxPriority
+	data := map[string]string{"level": "max", "msg": "最高优先级"}
+	err := MQ().PublishToPriorityQueue(context.Background(), queueName, 255, data, 255)
+	assert.NoError(t, err, "Publish max priority message failed")
+}
+
+// TestConsumeFromPriorityQueue 测试消费优先级队列，验证高优先级消息先被消费
+func TestConsumeFromPriorityQueue(t *testing.T) {
+	initMQ()
+	queueName := "test_priority_queue_consume"
+
+	receivedOrder := make(chan string, 10)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 启动消费者（不传 maxPriority，默认 10）
+	err := MQ().ConsumeFromPriorityQueue(ctx, queueName, func(data []byte) error {
+		var msg map[string]string
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return err
+		}
+		receivedOrder <- msg["level"]
+		return nil
+	})
+	require.NoError(t, err, "ConsumeFromPriorityQueue failed to start")
+	time.Sleep(200 * time.Millisecond)
+
+	// 先发低优先级，再发高优先级（验证高优先级先出队）
+	err = MQ().PublishToPriorityQueue(ctx, queueName, 1, map[string]string{"level": "low"})
+	require.NoError(t, err)
+
+	err = MQ().PublishToPriorityQueue(ctx, queueName, 5, map[string]string{"level": "medium"})
+	require.NoError(t, err)
+
+	err = MQ().PublishToPriorityQueue(ctx, queueName, 9, map[string]string{"level": "high"})
+	require.NoError(t, err)
+
+	// 验证消费顺序：高优先级先出
+	timeout := time.After(3 * time.Second)
+	var received []string
+	for i := 0; i < 3; i++ {
+		select {
+		case level := <-receivedOrder:
+			received = append(received, level)
+		case <-timeout:
+			t.Fatalf("Timeout waiting for message %d, received: %v", i, received)
+		}
+	}
+
+	// 验证顺序：high -> medium -> low
+	assert.Equal(t, "high", received[0], "Highest priority should be consumed first")
+	assert.Equal(t, "medium", received[1], "Medium priority should be consumed second")
+	assert.Equal(t, "low", received[2], "Low priority should be consumed last")
+}
+
+// TestPriorityQueueOrder 验证批量消息的优先级排序
+func TestPriorityQueueOrder(t *testing.T) {
+	initMQ()
+	queueName := "test_priority_queue_order"
+
+	receivedPriorities := make(chan int, 20)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 启动消费者（传入自定义 maxPriority=50）
+	err := MQ().ConsumeFromPriorityQueue(ctx, queueName, func(data []byte) error {
+		var msg struct {
+			Priority int `json:"priority"`
+		}
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return err
+		}
+		receivedPriorities <- msg.Priority
+		return nil
+	}, 50)
+	require.NoError(t, err)
+	time.Sleep(200 * time.Millisecond)
+
+	// 打乱顺序发送
+	priorities := []int{5, 20, 10, 50, 1, 30, 40, 15, 25, 35}
+	for _, p := range priorities {
+		err = MQ().PublishToPriorityQueue(ctx, queueName, uint8(p), map[string]int{"priority": p}, 50)
+		require.NoError(t, err)
+	}
+
+	// 验证消费顺序（应该按优先级降序）
+	timeout := time.After(5 * time.Second)
+	var received []int
+	for i := 0; i < len(priorities); i++ {
+		select {
+		case p := <-receivedPriorities:
+			received = append(received, p)
+		case <-timeout:
+			t.Fatalf("Timeout, received %d/%d messages: %v", i, len(priorities), received)
+		}
+	}
+
+	// 验证降序排列
+	for i := 1; i < len(received); i++ {
+		assert.GreaterOrEqual(t, received[i-1], received[i],
+			"Message %d (priority=%d) should have higher or equal priority than message %d (priority=%d)",
+			i-1, received[i-1], i, received[i])
+	}
+}
+
+// -----------------------------------------------------------------------------
+// 测试 Topic 交换机
+// -----------------------------------------------------------------------------
+
+func TestPublishToTopic(t *testing.T) {
+	initMQ()
+	exchangeName := "test_exchange_topic"
+	routingKey := "sms.us-east.1"
+	data := map[string]string{"message": "hello topic"}
+
+	// 执行发布
+	err := MQ().PublishToTopic(context.Background(), exchangeName, routingKey, data)
+	assert.NoError(t, err, "PublishToTopic failed")
+}
+
+func TestConsumeFromTopic(t *testing.T) {
+	initMQ()
+	exchangeName := "test_topic_consume_ex"
+	queueName := "test_topic_queue"
+	routingKey := "sms.*.1" // 通配符匹配
+
+	received := make(chan string, 10)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 启动消费者
+	err := MQ().ConsumeFromTopic(ctx, exchangeName, queueName, routingKey, false, func(data []byte) error {
+		received <- string(data)
+		return nil
+	})
+	require.NoError(t, err, "ConsumeFromTopic failed to start")
+	time.Sleep(200 * time.Millisecond)
+
+	// 发布消息
+	testData := "Topic Test"
+	err = MQ().PublishToTopic(ctx, exchangeName, "sms.us-east.1", testData)
+	require.NoError(t, err, "Publish to Topic failed")
+
+	// 验证接收
+	select {
+	case msg := <-received:
+		assert.Equal(t, testData, msg, "Received message mismatch")
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timeout waiting for message")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// 测试 Direct 交换机消费
+// -----------------------------------------------------------------------------
+
+func TestConsumeFromDirect(t *testing.T) {
+	initMQ()
+	exchangeName := "test_direct_consume_ex"
+	queueName := "test_direct_consume_queue"
+	routingKey := "sms.task"
+
+	received := make(chan string, 10)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 启动消费者
+	err := MQ().ConsumeFromDirect(ctx, exchangeName, queueName, routingKey, false, func(data []byte) error {
+		received <- string(data)
+		return nil
+	})
+	require.NoError(t, err, "ConsumeFromDirect failed to start")
+	time.Sleep(200 * time.Millisecond)
+
+	// 发布消息
+	testData := "Direct Consume Test"
+	err = MQ().PublishToDirect(ctx, exchangeName, routingKey, testData)
+	require.NoError(t, err, "Publish to Direct failed")
+
+	// 验证接收
+	select {
+	case msg := <-received:
+		assert.Equal(t, testData, msg, "Received message mismatch")
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timeout waiting for message")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// 测试延迟队列 (插件模式)
+// -----------------------------------------------------------------------------
+
+func TestPublishDelayPlugin(t *testing.T) {
+	initMQ()
+	exchangeName := "test_delay_plugin_ex"
+	routingKey := "sms.delay.plugin"
+	data := map[string]string{"message": "delayed plugin message"}
+
+	// 发布延迟消息 (1秒延迟)
+	err := MQ().PublishDelayPlugin(context.Background(), exchangeName, routingKey, data, 1*time.Second)
+	assert.NoError(t, err, "PublishDelayPlugin failed")
+}
+
+func TestConsumeDelayPlugin(t *testing.T) {
+	initMQ()
+	exchangeName := "test_delay_plugin_consume_ex"
+	queueName := "test_delay_plugin_queue"
+	routingKey := "sms.delay.plugin.consume"
+
+	received := make(chan string, 10)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 启动消费者
+	err := MQ().ConsumeDelayPlugin(ctx, exchangeName, queueName, routingKey, func(data []byte) error {
+		received <- string(data)
+		return nil
+	})
+	require.NoError(t, err, "ConsumeDelayPlugin failed to start")
+	time.Sleep(200 * time.Millisecond)
+
+	// 发布延迟消息 (100ms延迟，方便测试)
+	testData := "Delay Plugin Test"
+	err = MQ().PublishDelayPlugin(ctx, exchangeName, routingKey, testData, 100*time.Millisecond)
+	require.NoError(t, err, "PublishDelayPlugin failed")
+
+	// 验证接收
+	select {
+	case msg := <-received:
+		// 延迟消息会经过 JSON 序列化，这里直接比较字符串
+		assert.Contains(t, msg, "Delay Plugin Test", "Received message mismatch")
+	case <-time.After(3 * time.Second):
+		t.Fatal("Timeout waiting for delayed message")
+	}
 }

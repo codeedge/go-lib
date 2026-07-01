@@ -42,9 +42,9 @@ type Rabbit struct {
 	queueMu   sync.RWMutex        // 队列声明锁
 	queues    map[string]struct{} // 存储已声明的队列信息 虽然队列声明是幂等的，但为了减少io操作，这里使用一个 map 来存储已声明的队列信息
 	// 消费者注册表，用于自动恢复
-	consumerRegistry sync.Map       // Key: queueName+consumerTag, Value: *ConsumerState
-	consumeWG        sync.WaitGroup // 跟踪所有通过消费的任务
-	shuttingDown     atomic.Bool    // 优雅关闭状态标志
+	consumerRegistry sync.Map        // Key: queueName+consumerTag, Value: *ConsumerState
+	consumeWG        sync.WaitGroup  // 跟踪所有通过消费的任务
+	shuttingDown     atomic.Bool     // 优雅关闭状态标志
 	ctx              context.Context // 消费者上下文，来自 GracefulShutdown 的退出信号
 	// --- 新增：重连控制 ---
 	isConnecting  int32      // 0: 正常, 1: 正在重连
@@ -52,7 +52,9 @@ type Rabbit struct {
 }
 
 // New 创建 RabbitMQ 客户端
-func New(cfg Config) (*Rabbit, error) {
+// wg: 全局退出组，关闭完成后调用 wg.Done()
+// ctx: 退出信号上下文
+func New(cfg Config, wg *sync.WaitGroup, ctx context.Context) (*Rabbit, error) {
 	if cfg.MaxRetries <= 0 {
 		cfg.MaxRetries = 5
 	}
@@ -90,14 +92,18 @@ func New(cfg Config) (*Rabbit, error) {
 
 	go r.monitorConnection()
 
+	// 优雅退出
+	wg.Add(1)
+	go r.gracefulShutdown(wg, ctx)
+
 	return r, nil
 }
 
-// GracefulShutdown 优雅关闭处理
-// ctx: 退出信号上下文
-func (r *Rabbit) GracefulShutdown(ctx context.Context) {
-	r.ctx = ctx // 存储退出上下文，供消费者派生
-	<-r.ctx.Done() // 阻塞，直到收到停止信号
+// gracefulShutdown 优雅关闭处理
+func (r *Rabbit) gracefulShutdown(wg *sync.WaitGroup, ctx context.Context) {
+	defer wg.Done() // 通知全局组，本协调员任务已结束
+	r.ctx = ctx     // 存储退出上下文，供消费者派生
+	<-r.ctx.Done()  // 阻塞，直到收到停止信号
 
 	log.Println("rabbitmq-log:mq 接收到退出信号，正在停止新消息流入...")
 
@@ -574,7 +580,7 @@ func (r *Rabbit) DeclareExchange(opt ExchangeOption) (err error) {
 type QueueOption struct {
 	Name       string     // 队列名称
 	Durable    bool       // 是否持久化
-	AutoDelete bool       // 是否自动删除
+	AutoDelete bool       // 是否自动删除 最后一个消费者断开连接时自动删除
 	Exclusive  bool       // 是否排他队列
 	NoWait     bool       // 是否不等待服务器响应
 	Args       amqp.Table // 额外参数
@@ -620,9 +626,15 @@ func (r *Rabbit) DeclareQueue(opt *QueueOption) error {
 		opt.Args,
 	)
 	if err != nil {
-		log.Printf("rabbitmq-log:队列声明失败: queue:%s,err:%v\n", opt.Name, err)
-		channelClosed = true
-		return err
+		// 406 PRECONDITION_FAILED 说明队列已存在（只是属性不同），当作成功继续 当外面手动定义非持久化队列然后publish自动创建同名持久化队列会出现这个错误，这里仅记录日志即可，保留之前的队列属性
+		var amqpErr *amqp.Error
+		if errors.As(err, &amqpErr) && amqpErr.Code == 406 {
+			log.Printf("rabbitmq-log:队列已存在: queue:%s,err:%v\n", opt.Name, err)
+		} else {
+			log.Printf("rabbitmq-log:队列声明失败: queue:%s,err:%v\n", opt.Name, err)
+			channelClosed = true
+			return err
+		}
 	}
 
 	log.Printf("rabbitmq-log:队列声明 %s\n", queue.Name)

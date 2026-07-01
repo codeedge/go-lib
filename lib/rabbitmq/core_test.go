@@ -3,7 +3,6 @@ package rabbitmq
 import (
 	"context"
 	"feige-cloud-backend/pkg/exit"
-	"feige-cloud-backend/pkg/gopool"
 	"fmt"
 	"log"
 	"sync"
@@ -40,18 +39,10 @@ func MQ() *Rabbit {
 
 // initMQ 初始化 MQ 测试实例（类似 boot.go）
 func initMQ() {
-	mq, err := New(TestConfig)
+	mq, err := New(TestConfig, &exit.Instance.WG, exit.Instance.StopContext)
 	if err != nil {
 		panic(fmt.Sprintf("MQ初始化失败: %v", err))
 	}
-
-	// 优雅退出
-	exit.Instance.WG.Add(1)
-	gopool.Submit(context.Background(), func(ctx context.Context) {
-		defer exit.Instance.WG.Done()
-		mq.GracefulShutdown(exit.Instance.StopContext)
-	})
-
 	Set(mq)
 }
 

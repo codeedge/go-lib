@@ -700,3 +700,129 @@ func (r *Rabbit) SetupLogicHashQueues(exchangeName, routingKeyPrefix string, que
 	}
 	return nil
 }
+
+// ==================== 优先级队列 ====================
+// RabbitMQ 优先级队列允许消息按优先级顺序被消费，高优先级消息先出队。
+// 实现原理：队列声明时设置 x-max-priority 参数，发送时设置消息的 Priority 字段。
+//
+// 使用场景：
+//   - 短信发送：VIP 用户优先、紧急通知优先
+//   - 任务调度：高优先级任务插队处理
+//   - 消息过滤：按优先级分级处理
+//
+// 注意事项：
+//   - x-max-priority 必须在队列声明时设置，队列创建后不能修改
+//   - Priority 字段范围 0-255，值越大优先级越高
+//   - 未设置 Priority 的消息默认优先级为 0
+//   - 优先级队列会额外占用内存，maxPriority 不宜过大（建议 10-100）
+
+// PublishToPriorityQueue 发布消息到优先级队列
+// queueName: 队列名称
+// priority: 消息优先级 (0-255，越大越优先)
+// data: 业务数据
+// maxPriority: 可选参数，队列最大优先级，默认 10
+func (r *Rabbit) PublishToPriorityQueue(ctx context.Context, queueName string, priority uint8, data any, maxPriority ...uint8) error {
+	// 设置默认值
+	queueMaxPriority := uint8(10)
+	if len(maxPriority) > 0 {
+		queueMaxPriority = maxPriority[0]
+	}
+
+	// 声明带优先级的队列
+	if err := r.DeclareQueue(&QueueOption{
+		Name:       queueName,
+		Durable:    true,
+		AutoDelete: false,
+		Args: amqp.Table{
+			"x-max-priority": queueMaxPriority,
+		},
+	}); err != nil {
+		return fmt.Errorf("declare priority queue failed: %w", err)
+	}
+
+	body, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("json marshal failed: %w", err)
+	}
+
+	ch, err := r.GetChannel()
+	if err != nil {
+		return err
+	}
+
+	var channelClosed bool
+	defer func() {
+		if ch != nil {
+			if channelClosed || ch.IsClosed() {
+				ch.Close()
+			} else {
+				r.PutChannel(ch)
+			}
+		}
+	}()
+
+	pub := amqp.Publishing{
+		ContentType:  Json,
+		Body:         body,
+		DeliveryMode: amqp.Persistent,
+		Priority:     priority, // 关键：设置消息优先级
+	}
+
+	// 如果开启 Confirm 模式，走确认逻辑
+	if !r.config.EnablePublisherConfirm {
+		return ch.PublishWithContext(ctx, "", queueName, false, false, pub)
+	}
+
+	// Confirm 模式
+	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+	if err := ch.PublishWithContext(ctx, "", queueName, false, false, pub); err != nil {
+		return err
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case confirm, ok := <-confirms:
+		if !ok {
+			channelClosed = true
+			return errors.New("confirm channel closed")
+		}
+		if confirm.Ack {
+			return nil
+		}
+		return errors.New("message nack-ed by broker")
+	case <-time.After(5 * time.Second):
+		channelClosed = true
+		return errors.New("rabbitmq wait confirm timeout")
+	}
+}
+
+// ConsumeFromPriorityQueue 消费优先级队列
+// queueName: 队列名称
+// handler: 消息处理函数
+// maxPriority: 可选参数，队列最大优先级，默认 10
+func (r *Rabbit) ConsumeFromPriorityQueue(ctx context.Context, queueName string, handler func(data []byte) error, maxPriority ...uint8) error {
+	if queueName == "" {
+		return fmt.Errorf("queue name cannot be empty")
+	}
+
+	// 设置默认值
+	queueMaxPriority := uint8(10)
+	if len(maxPriority) > 0 {
+		queueMaxPriority = maxPriority[0]
+	}
+
+	// 声明带优先级的队列
+	if err := r.DeclareQueue(&QueueOption{
+		Name:       queueName,
+		Durable:    true,
+		AutoDelete: false,
+		Args: amqp.Table{
+			"x-max-priority": queueMaxPriority,
+		},
+	}); err != nil {
+		return fmt.Errorf("declare priority queue failed: %w", err)
+	}
+
+	return r.ConsumeWorkQueue(ctx, queueName, "priority-worker", PrefetchCount, handler)
+}
