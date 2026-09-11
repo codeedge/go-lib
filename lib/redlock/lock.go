@@ -2,8 +2,10 @@ package redlock
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/go-redsync/redsync/v4"
@@ -11,6 +13,14 @@ import (
 	"github.com/go-redsync/redsync/v4/redis/goredis/v9"
 	"github.com/redis/go-redis/v9"
 )
+
+// ErrLockBusy 抢锁失败(锁被其他持有者占用),调用方用 errors.Is 判断
+var ErrLockBusy = errors.New("lock busy")
+
+// IsLockBusy 判断 LockExtend/LockExtendGeneric 返回的错误是否为抢锁失败(锁被占用)
+func IsLockBusy(err error) bool {
+	return errors.Is(err, ErrLockBusy)
+}
 
 // Lock 分布式锁
 type Lock struct {
@@ -60,9 +70,9 @@ func (l *Lock) NewMutex(name string, options ...redsync.Option) *redsync.Mutex {
 // 适合场景：分布式系统并发时只允许一个进程执行一些耗时操作，无法保证锁在释放前执行完，需要给锁续租，直到程序执行完后释放锁，并停止续租
 // lockKey 锁的key
 // expiry 锁的过期时间
-// task 执行的任务
+// task 执行的任务,返回错误时记录日志并原样返回给调用方(抢锁失败返回的错误可用 errors.Is(err, ErrLockBusy) 判断)
 // timeouts 超时时间，控制任务最大执行时间，比给锁加超长时间更优，因为即使程序挂了锁住的时间更短
-func (l *Lock) LockExtend(lockKey string, expiry time.Duration, task func(), timeouts ...time.Duration) {
+func (l *Lock) LockExtend(lockKey string, expiry time.Duration, task func() error, timeouts ...time.Duration) error {
 	// 设置默认值
 	if expiry < 1 {
 		expiry = 10 * time.Second
@@ -74,11 +84,11 @@ func (l *Lock) LockExtend(lockKey string, expiry time.Duration, task func(), tim
 		timeout = timeouts[0]
 	}
 
-	// 创建一个带有过期时间的互斥锁
-	mutex := l.rs.NewMutex(lockKey, redsync.WithExpiry(expiry))
+	// 创建一个带有过期时间的互斥锁(默认3次重试,每次间隔50ms,抢不到约150ms内返回ErrLockBusy)
+	mutex := l.NewMutex(lockKey, redsync.WithExpiry(expiry))
 	if err := mutex.Lock(); err != nil {
 		log.Printf("LockExtend lock lockKey:%s err: %v\n", lockKey, err)
-		return
+		return fmt.Errorf("%w: %v", ErrLockBusy, err)
 	}
 
 	// 创建带超时的 Context，此 Context 将用于控制任务执行和看门狗协程
@@ -115,14 +125,106 @@ func (l *Lock) LockExtend(lockKey string, expiry time.Duration, task func(), tim
 		if ok, err := mutex.Unlock(); !ok || err != nil {
 			log.Printf("LockExtend unlock failed ok:%v,err:%v\n", ok, err)
 		}
-		// C. 捕获 panic 并重新抛出，避免静默吞噬导致调用者无法感知任务崩溃
+		// C. 捕获 panic 仅记日志，不允许向外抛（临界区任务 panic 不得传播）
 		if p := recover(); p != nil {
 			log.Printf("LockExtend: task panicked: %v\n", p)
 		}
 	}()
 
-	// 执行任务
-	task()
+	// 执行任务,任务出错记录日志并返回
+	if err := task(); err != nil {
+		log.Printf("LockExtend task err lockKey:%s err:%v\n", lockKey, err)
+		return err
+	}
+	return nil
+}
+
+// LockGuard TryLock成功后返回的锁句柄,持有期间看门狗自动续租,用完须 Release
+type LockGuard struct {
+	ctx    context.Context    // 控制看门狗协程:Release 或超时后 Done
+	cancel context.CancelFunc
+	mutex  *redsync.Mutex
+	once   sync.Once
+}
+
+// TryLock 尝试获取分布式锁(3次重试,约150ms内返回),成功返回带看门狗自动续租的句柄,失败返回 ErrLockBusy
+// 适合"先同步抢锁,抢到再把任务丢到后台执行"的场景:抢锁失败可立即提示用户,不产生任何副作用
+// lockKey 锁的key
+// expiry 锁的过期时间
+// timeouts 超时时间，控制锁最长持有时间(看门狗续租上限),超时后停止续租锁随TTL过期,防止任务卡死导致锁被无限占用;默认5分钟
+func (l *Lock) TryLock(lockKey string, expiry time.Duration, timeouts ...time.Duration) (*LockGuard, error) {
+	// 设置默认值
+	if expiry < 1 {
+		expiry = 10 * time.Second
+	}
+
+	var timeout = time.Minute * 5 // 默认5分钟超时
+	// 任务超时时间必须大于0
+	if len(timeouts) > 0 {
+		timeout = timeouts[0]
+	}
+
+	// 创建一个带有过期时间的互斥锁(默认3次重试,每次间隔50ms,抢不到约150ms内返回ErrLockBusy)
+	mutex := l.NewMutex(lockKey, redsync.WithExpiry(expiry))
+	if err := mutex.Lock(); err != nil {
+		log.Printf("TryLock lock lockKey:%s err: %v\n", lockKey, err)
+		return nil, fmt.Errorf("%w: %v", ErrLockBusy, err)
+	}
+
+	// 创建带超时的 Context，此 Context 将用于控制看门狗协程
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
+	g := &LockGuard{ctx: ctx, cancel: cancel, mutex: mutex}
+
+	// 开启一个 goroutine，周期性地续租锁（看门狗）
+	// 它监听 ctx.Done() 来停止续租
+	go func() {
+		ticker := time.NewTicker(expiry / 2) // 每隔过期时间的一半续租一次
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				ok, err := mutex.Extend()
+				if !ok || err != nil {
+					log.Printf("TryLock extend lock failed, exiting watchdog: ok:%v err:%v\n", ok, err)
+					return
+				}
+			case <-ctx.Done():
+				// 接收到取消信号（Release或超时），看门狗退出
+				return
+			}
+		}
+	}()
+
+	return g, nil
+}
+
+// Release 释放锁并停止看门狗(幂等,可重复调用)
+func (g *LockGuard) Release() {
+	g.once.Do(func() {
+		g.cancel()
+		if _, err := g.mutex.Unlock(); err != nil {
+			log.Printf("LockGuard unlock failed err:%v\n", err)
+		}
+	})
+}
+
+// AddTask 在后台协程执行任务,任务结束(含panic)自动 Release
+// 任务内遇到错误可提前调用 Release() 释放锁;不添加任务时须自行调用 Release
+func (g *LockGuard) AddTask(task func() error) {
+	go func() {
+		defer g.Release()
+		defer func() {
+			if p := recover(); p != nil {
+				log.Printf("LockGuard task panicked: %v\n", p)
+			}
+		}()
+
+		if err := task(); err != nil {
+			log.Printf("LockGuard task err err:%v\n", err)
+		}
+	}()
 }
 
 // LockExtendGeneric 创建带续租的分布式锁并执行任务并返回任务的返回值泛型函数
@@ -130,7 +232,7 @@ func (l *Lock) LockExtend(lockKey string, expiry time.Duration, task func(), tim
 // 适合场景：分布式系统并发时只允许一个进程执行一些耗时操作，无法保证锁在释放前执行完，需要给锁续租，直到程序执行完后释放锁，并停止续租
 // lockKey 锁的key
 // expiry 锁的过期时间
-// task 执行的任务
+// task 执行的任务,返回错误时记录日志并原样返回给调用方(抢锁失败返回的错误可用 errors.Is(err, ErrLockBusy) 判断)
 // timeouts 超时时间，控制任务最大执行时间
 func LockExtendGeneric[T any](l *Lock, lockKey string, expiry time.Duration, task func() (T, error), timeouts ...time.Duration) (res T, err error) {
 	// 设置默认值
@@ -144,11 +246,11 @@ func LockExtendGeneric[T any](l *Lock, lockKey string, expiry time.Duration, tas
 		timeout = timeouts[0]
 	}
 
-	// 创建一个带有过期时间的互斥锁
-	mutex := l.rs.NewMutex(lockKey, redsync.WithExpiry(expiry))
+	// 创建一个带有过期时间的互斥锁(默认3次重试,每次间隔50ms,抢不到约150ms内返回ErrLockBusy)
+	mutex := l.NewMutex(lockKey, redsync.WithExpiry(expiry))
 	if err = mutex.Lock(); err != nil {
 		log.Printf("LockExtend lock lockKey:%s err: %v\n", lockKey, err)
-		return res, fmt.Errorf("failed to acquire lock: %w", err)
+		return res, fmt.Errorf("%w: %v", ErrLockBusy, err)
 	}
 
 	// 创建带超时的 Context，此 Context 将用于控制任务执行和看门狗协程
@@ -185,14 +287,17 @@ func LockExtendGeneric[T any](l *Lock, lockKey string, expiry time.Duration, tas
 		if ok, err := mutex.Unlock(); !ok || err != nil {
 			log.Printf("LockExtend unlock failed ok:%v,err:%v\n", ok, err)
 		}
-		// C. 捕获 panic 并重新抛出，避免静默吞噬
+		// C. 捕获 panic 仅记日志，不允许向外抛（临界区任务 panic 不得传播）
 		if p := recover(); p != nil {
 			log.Printf("LockExtendGeneric: task panicked: %v\n", p)
 		}
 	}()
 
-	// 执行任务
+	// 执行任务,任务出错记录日志并返回
 	res, err = task()
+	if err != nil {
+		log.Printf("LockExtendGeneric task err lockKey:%s err:%v\n", lockKey, err)
+	}
 	return res, err
 }
 

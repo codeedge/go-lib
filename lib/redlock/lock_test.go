@@ -104,10 +104,11 @@ func TestLockExtend(t *testing.T) {
 	lockKey := "lock:sms:process:test"
 	executed := false
 
-	l.LockExtend(lockKey, 30*time.Second, func() {
+	l.LockExtend(lockKey, 30*time.Second, func() error {
 		// 模拟耗时任务
 		time.Sleep(100 * time.Millisecond)
 		executed = true
+		return nil
 	})
 
 	if !executed {
@@ -274,9 +275,10 @@ func TestConcurrentLock(t *testing.T) {
 	// 5 个 goroutine 竞争同一把锁
 	for i := 0; i < 5; i++ {
 		go func(id int) {
-			l.LockExtend(lockKey, 10*time.Second, func() {
+			l.LockExtend(lockKey, 10*time.Second, func() error {
 				counter++
 				time.Sleep(50 * time.Millisecond)
+				return nil
 			})
 			done <- true
 		}(i)
