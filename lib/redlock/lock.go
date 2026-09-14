@@ -201,6 +201,9 @@ func (l *Lock) TryLock(lockKey string, expiry time.Duration, timeouts ...time.Du
 }
 
 // Release 释放锁并停止看门狗(幂等,可重复调用)
+// 正常流程不需要手动调用:AddTask 内部已 defer Release,任务结束(含panic)必然执行;
+// 公开它用于两个场景: 1.任务中途提前放弃时主动释放 2.TryLock 后未走 AddTask 的路径须自行调用,
+// 否则看门狗会一直续租,锁直到进程重启才释放
 func (g *LockGuard) Release() {
 	g.once.Do(func() {
 		g.cancel()

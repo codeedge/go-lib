@@ -294,3 +294,129 @@ func TestConcurrentLock(t *testing.T) {
 		t.Errorf("counter = %d, want 5 (each goroutine should execute once)", counter)
 	}
 }
+
+// ==================== TryLock / LockGuard 测试 ====================
+
+// mockExportTask 模拟一个导出任务:按传入的耗时执行,返回模拟的导出结果
+func mockExportTask(duration time.Duration, rows int) error {
+	time.Sleep(duration) // 模拟查询+生成Excel的耗时
+	if rows < 0 {
+		return fmt.Errorf("模拟导出失败: 行数=%d", rows)
+	}
+	return nil
+}
+
+// TestTryLock 基本抢锁:成功后锁存在,Release后可再次抢到
+func TestTryLock(t *testing.T) {
+	l := New(&redis.Options{Addr: "localhost:6379"})
+	if l == nil {
+		t.Skip("Redis not available, skip test")
+	}
+
+	lockKey := "test:trylock:basic"
+
+	// 第一次抢锁应成功
+	guard, err := l.TryLock(lockKey, 10*time.Second, 30*time.Second)
+	if err != nil {
+		t.Fatalf("第一次TryLock应成功: %v", err)
+	}
+
+	// 锁被占用期间,第二次抢锁应失败
+	if _, err := l.TryLock(lockKey, 10*time.Second, 30*time.Second); !IsLockBusy(err) {
+		t.Fatalf("第二次TryLock应返回LockBusy, got: %v", err)
+	}
+
+	// 释放后应能重新抢到
+	guard.Release()
+	guard2, err := l.TryLock(lockKey, 10*time.Second, 30*time.Second)
+	if err != nil {
+		t.Fatalf("Release后TryLock应成功: %v", err)
+	}
+	guard2.Release()
+}
+
+// TestTryLockAddTask 模拟导出场景:同步抢锁 -> AddTask后台执行 -> 任务结束自动释放
+func TestTryLockAddTask(t *testing.T) {
+	l := New(&redis.Options{Addr: "localhost:6379"})
+	if l == nil {
+		t.Skip("Redis not available, skip test")
+	}
+
+	lockKey := "test:trylock:addtask"
+	done := make(chan error, 1)
+
+	// 模拟接口层:先同步抢锁(抢不到直接报错,不产生任务)
+	guard, err := l.TryLock(lockKey, 10*time.Second, 30*time.Second)
+	if err != nil {
+		t.Fatalf("抢锁失败: %v", err)
+	}
+
+	// 抢到锁才创建任务,AddTask后台执行,任务结束(含panic)自动Release
+	guard.AddTask(func() error {
+		defer func() { done <- nil }()
+		return mockExportTask(100*time.Millisecond, 100) // 模拟导出100行
+	})
+
+	// 任务执行期间锁仍被占用
+	if _, err := l.TryLock(lockKey, 10*time.Second, 30*time.Second); !IsLockBusy(err) {
+		t.Log("注意: 任务可能已执行完毕(时序竞争), err:", err)
+	}
+
+	// 等任务跑完
+	<-done
+	time.Sleep(100 * time.Millisecond) // 等Release完成
+
+	// 任务结束后锁应已自动释放,可再次抢到
+	guard2, err := l.TryLock(lockKey, 10*time.Second, 30*time.Second)
+	if err != nil {
+		t.Fatalf("AddTask结束后锁应自动释放: %v", err)
+	}
+	guard2.Release()
+}
+
+// TestTryLockAddTaskPanic 任务panic时锁也必须被释放
+func TestTryLockAddTaskPanic(t *testing.T) {
+	l := New(&redis.Options{Addr: "localhost:6379"})
+	if l == nil {
+		t.Skip("Redis not available, skip test")
+	}
+
+	lockKey := "test:trylock:panic"
+	guard, err := l.TryLock(lockKey, 10*time.Second, 30*time.Second)
+	if err != nil {
+		t.Fatalf("抢锁失败: %v", err)
+	}
+
+	guard.AddTask(func() error {
+		panic("模拟导出过程panic")
+	})
+
+	time.Sleep(200 * time.Millisecond) // 等panic协程退出并Release
+
+	// panic后锁应已自动释放
+	guard2, err := l.TryLock(lockKey, 10*time.Second, 30*time.Second)
+	if err != nil {
+		t.Fatalf("任务panic后锁应自动释放: %v", err)
+	}
+	guard2.Release()
+}
+
+// TestTryLockTimeout 与LockExtend同款:不传timeouts用默认5分钟,传入即最长持有时间
+func TestTryLockTimeout(t *testing.T) {
+	l := New(&redis.Options{Addr: "localhost:6379"})
+	if l == nil {
+		t.Skip("Redis not available, skip test")
+	}
+
+	guard, err := l.TryLock("test:trylock:timeout-default", 10*time.Second)
+	if err != nil {
+		t.Fatalf("TryLock失败: %v", err)
+	}
+	guard.Release()
+
+	guard, err = l.TryLock("test:trylock:timeout-custom", 10*time.Second, 30*time.Minute)
+	if err != nil {
+		t.Fatalf("TryLock失败: %v", err)
+	}
+	guard.Release()
+}
