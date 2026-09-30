@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>SSE 多用户测试台</title>
+<style>
+  body { font-family: -apple-system, "Microsoft YaHei", sans-serif; max-width: 860px; margin: 24px auto; padding: 0 16px; background: #f7f7f8; }
+  h2 { border-bottom: 2px solid #4a90d9; padding-bottom: 6px; margin-bottom: 14px; }
+  .card { background: #fff; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .card b { margin-right: 8px; }
+  input { padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+  #token { width: 420px; font-size: 12px; }
+  #targetUid { width: 200px; }
+  button { padding: 6px 16px; margin-left: 6px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .btn-send { background: #4a90d9; color: #fff; }
+  .btn-broadcast { background: #e67e22; color: #fff; }
+  .btn-gray { background: #999; color: #fff; }
+  .btn-mini { padding: 2px 10px; font-size: 12px; background: #ccc; }
+  .hint { font-size: 12px; color: #888; margin-left: 8px; }
+  .panel { background: #fff; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.1); overflow: hidden; }
+  .panel-head { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #fafafa; border-bottom: 1px solid #eee; }
+  .panel-head .meta { color: #999; font-size: 12px; }
+  .panel-head .btn-mini { margin-left: auto; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .dot.on { background: #2ecc71; }
+  .dot.off { background: #ccc; }
+  .panel-log { height: 170px; overflow-y: auto; background: #1e1e1e; color: #d4d4d4; font-family: Consolas, monospace; font-size: 12px; padding: 8px 10px; }
+  .me { color: #7ec8ff; }
+  .bc { color: #ffd880; }
+  .sys { color: #8a8a8a; }
+</style>
+</head>
+<body>
+<h2>SSE 多用户测试台</h2>
+
+<div class="card">
+  <b>推送</b>
+  <input id="targetUid" placeholder="目标用户ID">
+  <input id="targetServer" placeholder="目标服务名（留空=本服务）">
+  <button class="btn-send" onclick="sendToUser()">发给该用户</button>
+  <button class="btn-broadcast" onclick="broadcast()">广播给全部在线</button>
+  <span id="sendHint" class="hint">发送使用第一个已登录用户的token；跨服务推送需目标服务名在白名单内</span>
+</div>
+
+<div class="card">
+  <b>登录新用户</b>
+  <input id="token" placeholder="粘贴 token（运行 python3 /tmp/gen_tokens.py 获取）" value="">
+  <button class="btn-send" onclick="login()">登录并连接</button>
+  <button class="btn-gray" onclick="disconnectAll()">全部断开</button>
+  <div class="hint" style="margin:6px 0 0">每登录一次新增一个用户面板，uuid自动分配（dev-1、dev-2…）；同一个token可登录多次模拟多端</div>
+</div>
+
+<div id="panels"></div>
+
+<script>
+const API = 'http://192.168.1.29:13001';
+const users = [];   // {token, userId, uuid, wrap, dot, title, logEl, abort}
+let seq = 0;
+
+function logTo(p, html, cls) {
+  const div = document.createElement('div');
+  div.className = cls || '';
+  div.innerHTML = html;
+  p.logEl.appendChild(div);
+  p.logEl.scrollTop = p.logEl.scrollHeight;
+}
+
+function decodeUserId(token) {
+  try {
+    const b = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    // user_id是19位雪花ID，超过JS安全整数范围(2^53)，必须按字符串提取；JSON.parse会舍入成错误ID
+    const m = atob(b).match(/"user_id"\s*:\s*(\d+)/);
+    return m ? m[1] : '?';
+  } catch (e) { return '?'; }
+}
+
+function login() {
+  const token = document.getElementById('token').value.trim();
+  if (!token) return alert('请粘贴token');
+  const uuid = 'dev-' + (++seq);
+  const userId = decodeUserId(token);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'panel';
+  wrap.innerHTML =
+    '<div class="panel-head">' +
+      '<span class="dot off"></span>' +
+      '<b class="title">连接中…</b>' +
+      '<span class="meta">uuid: ' + uuid + '</span>' +
+      '<button class="btn-mini">断开</button>' +
+    '</div>' +
+    '<div class="panel-log"></div>';
+  document.getElementById('panels').appendChild(wrap);
+
+  const p = {
+    token: token, userId: userId, uuid: uuid, wrap: wrap,
+    dot: wrap.querySelector('.dot'),
+    title: wrap.querySelector('.title'),
+    logEl: wrap.querySelector('.panel-log'),
+    abort: new AbortController()
+  };
+  users.push(p);
+  bindDisconnectButtons();
+  p.title.style.cursor = 'pointer';
+  p.title.title = '点击复制该用户ID';
+  p.title.onclick = function () {
+    const ta = document.createElement('textarea');
+    ta.value = p.userId; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    hint('已复制用户ID: ' + p.userId);
+  };
+
+  fetch(API + '/cus/sse?uuid=' + encodeURIComponent(uuid), {
+    headers: { 'Authorization': token },
+    signal: p.abort.signal
+  }).then(function (resp) {
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    p.dot.className = 'dot on';
+    p.title.textContent = '用户 ' + userId;
+    logTo(p, '连接成功', 'sys');
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    (function read() {
+      reader.read().then(function (r) {
+        if (r.done) { p.dot.className = 'dot off'; logTo(p, '连接已关闭', 'sys'); return; }
+        buf += decoder.decode(r.value, { stream: true });
+        const frames = buf.split('\n\n');
+        buf = frames.pop();
+        frames.forEach(function (f) {
+          if (!f.trim()) return;
+          if (f.indexOf('event:ping') === 0) { logTo(p, ': ping', 'sys'); return; }
+          if (f.charAt(0) === ':') { logTo(p, f, 'sys'); return; }
+          const data = f.replace(/^data:/gm, '').trim();
+          if (!data) return;
+          try {
+            const m = JSON.parse(data);
+            logTo(p, '[' + new Date().toLocaleTimeString() + '] type=' + m.type + ' | ' + JSON.stringify(m.data),
+                  m.user_id === 0 ? 'bc' : 'me');
+          } catch (e) { logTo(p, '原始: ' + data, 'sys'); }
+        });
+        read();
+      }).catch(function (err) {
+        p.dot.className = 'dot off';
+        logTo(p, '读取中断: ' + err.message, 'sys');
+      });
+    })();
+  }).catch(function (err) {
+    p.dot.className = 'dot off';
+    p.title.textContent = '用户 ' + userId + ' (失败)';
+    logTo(p, '连接失败: ' + err.message, 'sys');
+  });
+}
+
+function disconnect(index) {
+  const p = users[index];
+  if (!p) return;
+  p.abort.abort();
+  users.splice(index, 1);
+  p.wrap.remove();
+  bindDisconnectButtons();
+}
+
+function disconnectAll() {
+  while (users.length) disconnect(users.length - 1);
+}
+
+// 数组下标会随删除变化，统一重新绑定
+function bindDisconnectButtons() {
+  users.forEach(function (u, i) {
+    u.wrap.querySelector('.btn-mini').onclick = function () { disconnect(i); };
+  });
+}
+
+function senderToken() {
+  if (!users.length) { alert('请先登录一个用户（发送需要token鉴权）'); return null; }
+  return users[0].token;
+}
+
+function sendToUser() {
+  const uid = document.getElementById('targetUid').value.trim();
+  if (!uid) return alert('请输入目标用户ID');
+  const tk = senderToken();
+  if (!tk) return;
+  fetch(API + '/cus/sse/test_push?t=1&uid=' + encodeURIComponent(uid) + serverParam(), { headers: { 'Authorization': tk } })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { hint('已发给用户 ' + uid + '：' + (d.data || d.msg || '')); })
+    .catch(function (e) { hint('发送失败: ' + e.message); });
+}
+
+function broadcast() {
+  const tk = senderToken();
+  if (!tk) return;
+  fetch(API + '/cus/sse/test_push?t=2' + serverParam(), { headers: { 'Authorization': tk } })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { hint('已广播：' + (d.data || d.msg || '')); })
+    .catch(function (e) { hint('广播失败: ' + e.message); });
+}
+
+function serverParam() {
+  const s = document.getElementById('targetServer').value.trim();
+  return s ? '&server=' + encodeURIComponent(s) : '';
+}
+
+function hint(text) { document.getElementById('sendHint').textContent = text; }
+</script>
+</body>
+</html>
