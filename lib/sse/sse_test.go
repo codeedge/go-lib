@@ -6,21 +6,26 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-
-	projectredis "feige-cloud-backend/pkg/redis"
 )
 
 // SSE 全局变量（初始化模式前由boot注入），当前已改为instance.SSE()用法，保留作历史参考
 // var SSE *Service
 
+// newTestRedis 连接本地测试redis（默认127.0.0.1:6379无密码，可按需改地址），连不上则跳过测试
+func newTestRedis(t *testing.T) *goredis.Client {
+	t.Helper()
+	client := goredis.NewClient(&goredis.Options{Addr: "127.0.0.1:6379"})
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		client.Close()
+		t.Skipf("本地redis不可用，跳过: %v", err)
+	}
+	return client
+}
+
 // TestSSE 本地集成测试：需要本机跑着一个无密码redis（默认127.0.0.1:6379）
 // 跑法：go test ./pkg/sse/ -run TestSSE -v
 func TestSSE(t *testing.T) {
-	rdb, err := projectredis.New(&goredis.Options{Addr: "127.0.0.1:6379", DB: 0})
-	if err != nil {
-		t.Skipf("本地redis不可用，跳过: %v", err)
-	}
-	client := rdb.Rdb()
+	client := newTestRedis(t)
 
 	svc := New(&Config{
 		Rds:        client,
@@ -64,11 +69,7 @@ func TestSSE(t *testing.T) {
 // 前提：目标服务名必须在 Config.RemoteServerNames 白名单内，否则推送会被静默丢弃（deny by default）
 // 跑法：go test ./pkg/sse/ -run TestSSECrossService -v
 func TestSSECrossService(t *testing.T) {
-	rdb, err := projectredis.New(&goredis.Options{Addr: "127.0.0.1:6379", DB: 0})
-	if err != nil {
-		t.Skipf("本地redis不可用，跳过: %v", err)
-	}
-	client := rdb.Rdb()
+	client := newTestRedis(t)
 	ctx := context.Background()
 
 	// 服务A：发起推送方，白名单里允许推给 app-b

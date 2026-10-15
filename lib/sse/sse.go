@@ -125,6 +125,21 @@ type Message struct {
 // pingMsg messageChan的心跳哨兵值：空字符串不代表数据，Connect收到后写入SSE注释帧（浏览器忽略，仅让连接上有字节流动）
 const pingMsg = ""
 
+// userIDKey 用户id在gin上下文中的键名（与各项目自己的"user_id"分开，避免类型歧义）
+const userIDKey = "sse_user_id"
+
+// SetUserID 由鉴权中间件在登录态校验通过后调用，把用户id注入gin上下文供SSE使用。
+// 各项目JWT claims里id的类型不一（int/int64），由调用方统一转成int64传入，包内读取无需兼容分支。
+// 用法：sse.SetUserID(c, claims.UserId)  或 op端：sse.SetUserID(c, int64(claims.UserId))
+func SetUserID(c *gin.Context, userId int64) {
+	c.Set(userIDKey, userId)
+}
+
+// GetUserID 读取鉴权中间件注入的用户id，未注入时返回0
+func GetUserID(c *gin.Context) int64 {
+	return c.GetInt64(userIDKey)
+}
+
 // New 创建SSE服务实例，全部参数收敛到Config
 // 配置非法时直接panic，属于部署期配置错误，应让进程立即失败而不是带病运行
 func New(cfg *Config) *Service {
@@ -211,6 +226,21 @@ func (s *Service) getRedisKey(serviceName, keyPattern string, args ...interface{
 	return fmt.Sprintf(keyPattern, allArgs...)
 }
 
+// maxLogDataLen 日志里消息内容的最大字符数，超出截断，避免大消息刷爆日志
+const maxLogDataLen = 512
+
+// logData 把消息内容转成单行日志文本（JSON），超长按字符截断
+func logData(data any) string {
+	b, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Sprintf("%v", data)
+	}
+	if r := []rune(string(b)); len(r) > maxLogDataLen {
+		return string(r[:maxLogDataLen]) + "..."
+	}
+	return string(b)
+}
+
 // Connect SSE连接
 func (s *Service) Connect(c *gin.Context) {
 	/*
@@ -233,10 +263,16 @@ func (s *Service) Connect(c *gin.Context) {
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("Access-Control-Allow-Origin", "*")
+	// 让 nginx 系反向代理(含 APISIX/OpenResty)对这条响应关掉缓冲。
+	// 代理默认 proxy_buffering on，攒够一个缓冲区才往下发；SSE 是"小数据+长连接"，13字节的
+	// 连接帧永远攒不满，结果客户端连响应头都收不到(测试环境实测75秒0字节)。
+	// nginx 默认不把 X-Accel-* 头透传给客户端，不会污染响应。
+	c.Header("X-Accel-Buffering", "no")
 
-	// userId由路由上的鉴权中间件（JWT等）注入；未挂鉴权中间件时拒绝连接
-	userId := c.GetInt64("user_id")
+	// userId由鉴权中间件通过 sse.SetUserID 注入；没注入说明路由没挂在鉴权之后，拒绝连接
+	userId := GetUserID(c)
 	if userId <= 0 {
+		log.Printf("sse: %s not found in context, did the auth middleware call sse.SetUserID?", userIDKey)
 		c.AbortWithStatus(http.StatusUnauthorized)
 		return
 	}
@@ -470,6 +506,9 @@ func (s *Service) SendToUser(userId int64, msgData any, msgType int, serverNames
 		if !delivered {
 			s.storeOfflineMessage(msg)
 		}
+		// 发送日志：在线=false 表示没投到任何在线设备，消息已转离线队列
+		log.Printf("sse 发送 单推: 服务=%s 节点=%d 用户=%d 类型=%d 设备数=%d 在线=%v 内容=%s",
+			serverName, s.cfg.NodeId, userId, msgType, len(uuids), delivered, logData(msgData))
 	}
 }
 
@@ -487,6 +526,7 @@ func (s *Service) routeToClient(msg *Message, nodeId int) bool {
 		log.Printf("Error publishing to node %d: %v", nodeId, err)
 		return false
 	}
+	log.Printf("sse 发送 跨节点: 服务=%s 本节点=%d 目标节点=%d 用户=%d 设备=%s", msg.ServerName, s.cfg.NodeId, nodeId, msg.UserId, msg.UUID)
 	return true
 }
 
@@ -506,6 +546,8 @@ func (s *Service) BroadcastMessage(msgData any, msgType int, serverNames ...stri
 		if err := s.cfg.Rds.Publish(s.ctx, s.getRedisKey(serverName, s.redisPubSubChannelKeyPattern, -1), string(data)).Err(); err != nil {
 			log.Printf("Error publishing broadcast: %v", err)
 		}
+		// 发送日志：广播只publish一条，各节点收到后各自投递本地客户端（接收侧有接收日志）
+		log.Printf("sse 发送 广播: 服务=%s 节点=%d 类型=%d 内容=%s", serverName, s.cfg.NodeId, msgType, logData(msgData))
 	}
 }
 
@@ -648,6 +690,10 @@ func (s *Service) subscribeChannel(_msg *redis.Message) {
 		}
 		s.clientsSync.RUnlock()
 
+		// 接收日志：本节点客户端数即这条广播在本节点要投递的数量
+		log.Printf("sse 接收 广播: 服务=%s 节点=%d 频道=%s 本节点客户端数=%d 内容=%s",
+			s.cfg.ServerName, s.cfg.NodeId, _msg.Channel, len(refs), logData(msg.Data))
+
 		// 广播投递放独立协程：某个慢客户端的超时等待（最长SlowClientTimeout）不阻塞订阅循环收发后续消息
 		go func() {
 			for _, ref := range refs {
@@ -661,6 +707,8 @@ func (s *Service) subscribeChannel(_msg *redis.Message) {
 	} else {
 		// 只处理目标为本节点的消息
 		if msg.NodeId == s.cfg.NodeId {
+			log.Printf("sse 接收 单推: 服务=%s 节点=%d 频道=%s 用户=%d 设备=%s 内容=%s",
+				s.cfg.ServerName, s.cfg.NodeId, _msg.Channel, msg.UserId, msg.UUID, logData(msg.Data))
 			s.deliverToClient(&msg)
 		}
 	}

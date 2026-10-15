@@ -50,7 +50,7 @@ func (s *Service) handleTestPush(c *gin.Context) {
 		s.BroadcastMessage(msg, 1, serverNames...)
 	default:
 		// t=1: 指定uid则发给该用户，否则发给自己
-		uid := c.GetInt64("user_id")
+		uid := GetUserID(c)
 		if q := c.Query("uid"); q != "" {
 			v, err := strconv.ParseInt(q, 10, 64)
 			if err != nil || v <= 0 {

@@ -34,6 +34,13 @@
 <h2>SSE 多用户测试台</h2>
 
 <div class="card">
+  <b>接口</b>
+  <input id="apiHost" value="192.168.1.29:13001" placeholder="host:port" style="width:190px">
+  <input id="apiPrefix" value="/cus" placeholder="/cus 或 /op" style="width:110px">
+  <span class="hint">后面的 /sse、/sse/stats、/sse/test_push 固定不变</span>
+</div>
+
+<div class="card">
   <b>推送</b>
   <input id="targetUid" placeholder="目标用户ID">
   <input id="targetServer" placeholder="目标服务名（留空=本服务）">
@@ -53,7 +60,14 @@
 <div id="panels"></div>
 
 <script>
-const API = 'http://192.168.1.29:13001';
+// 接口地址 = host + 路由前缀，后面的 /sse、/sse/stats、/sse/test_push 是固定的
+function apiBase() {
+  let host = document.getElementById('apiHost').value.trim().replace(/\/+$/, '');
+  if (host && !/^https?:\/\//.test(host)) host = 'http://' + host;
+  let prefix = document.getElementById('apiPrefix').value.trim();
+  if (prefix && prefix[0] !== '/') prefix = '/' + prefix;
+  return host + prefix.replace(/\/+$/, '');
+}
 const users = [];   // {token, userId, uuid, wrap, dot, title, logEl, abort}
 let seq = 0;
 
@@ -110,7 +124,7 @@ function login() {
     hint('已复制用户ID: ' + p.userId);
   };
 
-  fetch(API + '/cus/sse?uuid=' + encodeURIComponent(uuid), {
+  fetch(apiBase() + '/sse?uuid=' + encodeURIComponent(uuid), {
     headers: { 'Authorization': token },
     signal: p.abort.signal
   }).then(function (resp) {
@@ -182,7 +196,7 @@ function sendToUser() {
   if (!uid) return alert('请输入目标用户ID');
   const tk = senderToken();
   if (!tk) return;
-  fetch(API + '/cus/sse/test_push?t=1&uid=' + encodeURIComponent(uid) + serverParam(), { headers: { 'Authorization': tk } })
+  fetch(apiBase() + '/sse/test_push?t=1&uid=' + encodeURIComponent(uid) + serverParam(), { headers: { 'Authorization': tk } })
     .then(function (r) { return r.json(); })
     .then(function (d) { hint('已发给用户 ' + uid + '：' + (d.data || d.msg || '')); })
     .catch(function (e) { hint('发送失败: ' + e.message); });
@@ -191,7 +205,7 @@ function sendToUser() {
 function broadcast() {
   const tk = senderToken();
   if (!tk) return;
-  fetch(API + '/cus/sse/test_push?t=2' + serverParam(), { headers: { 'Authorization': tk } })
+  fetch(apiBase() + '/sse/test_push?t=2' + serverParam(), { headers: { 'Authorization': tk } })
     .then(function (r) { return r.json(); })
     .then(function (d) { hint('已广播：' + (d.data || d.msg || '')); })
     .catch(function (e) { hint('广播失败: ' + e.message); });
